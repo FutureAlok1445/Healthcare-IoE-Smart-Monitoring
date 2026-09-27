@@ -249,3 +249,23 @@ class VitalIngestTests(TestCase):
         self.assertEqual(res_latest.status_code, 200)
         self.assertEqual(len(res_latest.data), 1)
 
+    def test_auth_login_endpoint(self):
+        payload = {"email": "dr.mehta@caresense.io", "password": "password123", "role": "Doctor"}
+        res = self.client.post('/api/v1/auth/login/', payload, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('token', res.data)
+        self.assertEqual(res.data['user']['name'], 'Dr. Mehta')
+        self.assertEqual(res.data['user']['role'], 'Doctor')
+
+    def test_patient_thresholds_endpoint(self):
+        p = Patient.objects.create(name="Rahul Sharma", device_id="ESP32_NODE_RS")
+        res_get = self.client.get(f'/api/v1/patients/{p.id}/thresholds/')
+        self.assertEqual(res_get.status_code, 200)
+        self.assertEqual(res_get.data['thresholds']['hr_max'], 120)
+
+        patch_payload = {"thresholds": {"hr_min": 55, "hr_max": 125, "spo2_min": 93, "temp_max": 38.0}}
+        res_patch = self.client.patch(f'/api/v1/patients/{p.id}/thresholds/', patch_payload, format='json')
+        self.assertEqual(res_patch.status_code, 200)
+        self.assertEqual(res_patch.data['thresholds']['hr_max'], 125)
+
+
