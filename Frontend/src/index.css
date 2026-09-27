@@ -1,111 +1,214 @@
+/* ==========================================================================
+   CareSense IoE — Medical-Grade Design System Tokens & Base Reset
+   Design Direction: Clinical Instrument / Calm Precision
+   ========================================================================== */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Surface & Background Tokens */
+  --bg-app: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-muted: #f1f5f9;
+  --surface-raised: #ffffff;
+  --surface-dark: #0f172a;
+  --surface-hover: #f8fafc;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Border & Focus Ring Tokens */
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --ring-focus: #3b82f6;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  /* Typography Tokens */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-inverse: #ffffff;
+
+  /* Brand / Clinical Accent (Clinical Blue 210-215° hue) */
+  --brand-primary: #0284c7;
+  --brand-hover: #0369a1;
+  --brand-tint: #e0f2fe;
+  --brand-subtle: rgba(2, 132, 199, 0.08);
+
+  /* Clinical Semantic Status Tokens (Strictly Reserved) */
+  --status-ok: #059669;
+  --status-ok-bg: #ecfdf5;
+  --status-ok-border: #a7f3d0;
+
+  --status-warning: #d97706;
+  --status-warning-bg: #fffbeb;
+  --status-warning-border: #fde68a;
+
+  --status-danger: #dc2626;
+  --status-danger-bg: #fef2f2;
+  --status-danger-border: #fecaca;
+
+  --status-neutral: #64748b;
+  --status-neutral-bg: #f1f5f9;
+  --status-neutral-border: #cbd5e1;
+
+  --status-simulated: #7c3aed;
+  --status-simulated-bg: #f5f3ff;
+  --status-simulated-border: #ddd6fe;
+
+  /* Role Indicators */
+  --role-doctor: #0284c7;
+  --role-doctor-bg: #e0f2fe;
+  --role-nurse: #0d9488;
+  --role-nurse-bg: #ccfbf1;
+  --role-admin: #4f46e5;
+  --role-admin-bg: #e0e7ff;
+
+  /* Geometry & Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-full: 9999px;
+
+  /* Elevation Shadows (Border + subtle shadow, no heavy drop) */
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -4px rgba(15, 23, 42, 0.05);
+  --shadow-glow-red: 0 0 0 4px rgba(220, 38, 38, 0.2);
+
+  /* Typography Families */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Standard Transitions */
+  --motion-fast: 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-base: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-slow: 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Dark Theme Support (Clinical Night Ward) */
+[data-theme="dark"] {
+  --bg-app: #0b1120;
+  --surface-card: #0f172a;
+  --surface-muted: #1e293b;
+  --surface-raised: #1e293b;
+  --surface-dark: #020617;
+  --surface-hover: #1e293b;
+
+  --border-subtle: #1e293b;
+  --border-strong: #334155;
+  --ring-focus: #60a5fa;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --text-inverse: #0f172a;
+
+  --brand-primary: #38bdf8;
+  --brand-hover: #7dd3fc;
+  --brand-tint: rgba(56, 189, 248, 0.15);
+  --brand-subtle: rgba(56, 189, 248, 0.1);
+
+  --status-ok: #34d399;
+  --status-ok-bg: rgba(52, 211, 153, 0.12);
+  --status-ok-border: rgba(52, 211, 153, 0.3);
+
+  --status-warning: #fbbf24;
+  --status-warning-bg: rgba(251, 191, 36, 0.12);
+  --status-warning-border: rgba(251, 191, 36, 0.3);
+
+  --status-danger: #f87171;
+  --status-danger-bg: rgba(248, 113, 113, 0.15);
+  --status-danger-border: rgba(248, 113, 113, 0.35);
+
+  --status-neutral: #94a3b8;
+  --status-neutral-bg: rgba(148, 163, 184, 0.1);
+  --status-neutral-border: #334155;
+
+  --status-simulated: #a78bfa;
+  --status-simulated-bg: rgba(167, 139, 250, 0.15);
+  --status-simulated-border: rgba(167, 139, 250, 0.3);
+
+  --role-doctor-bg: rgba(56, 189, 248, 0.15);
+  --role-nurse-bg: rgba(45, 212, 191, 0.15);
+  --role-admin-bg: rgba(129, 140, 248, 0.15);
+
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.37);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.45);
+}
+
+/* Global Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-body {
-  margin: 0;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
+  width: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
+  background-color: var(--bg-app);
+  overflow-x: hidden;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* Numerics Non-Negotiable: Tabular Numbers Everywhere */
+.tabular-nums,
+.metric-num,
+.stat-value,
+.coord-val,
+.timestamp-val,
+.spec-value,
+.table-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
+
+/* Typography Hierarchy */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.25;
 }
+
+h1 { font-size: 1.5rem; letter-spacing: -0.02em; }
+h2 { font-size: 1.15rem; letter-spacing: -0.01em; }
+h3 { font-size: 1rem; font-weight: 600; }
+h4 { font-size: 0.875rem; font-weight: 600; }
+
 p {
-  margin: 0;
+  color: var(--text-secondary);
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+/* Smooth Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+/* Accessibility: Respect Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import VitalCard from './components/VitalCard';
 import AlertLog from './components/AlertLog';
 import HistoryTable from './components/HistoryTable';
@@ -12,10 +12,12 @@ import PatientsTab from './components/PatientsTab';
 import AlertsTab from './components/AlertsTab';
 import ReportsTab from './components/ReportsTab';
 import SettingsTab from './components/SettingsTab';
+import CommandPalette from './components/CommandPalette';
 import {
   IconUser,
   IconAlertTriangle,
-  IconCpu,
+  IconSearch,
+  IconActivity,
 } from './components/Icons';
 import {
   fetchPatients,
@@ -23,23 +25,25 @@ import {
   fetchAlerts,
   fetchAllAlerts,
   acknowledgeAlert,
-  WARD_PATIENTS,
+  resolveAlert,
+  logoutUser,
+  getCurrentUser,
 } from './services/api';
 import './App.css';
-
-function statusColor(value, breach) {
-  return breach(value) ? '#dc2626' : '#16a34a';
-}
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('caresense_user');
-    return saved ? JSON.parse(saved) : { id: 1, name: 'Dr. Mehta', role: 'Doctor', email: 'dr.mehta@caresense.io' };
+    return saved ? JSON.parse(saved) : null;
   });
 
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [patients, setPatients] = useState(WARD_PATIENTS);
-  const [selectedPatientId, setSelectedPatientId] = useState(1);
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('caresense_theme') || 'light';
+  });
+
+  const [patients, setPatients] = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [vitals, setVitals] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [allAlerts, setAllAlerts] = useState([]);
@@ -47,63 +51,121 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [activeEmergency, setActiveEmergency] = useState(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('caresense_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  // Clock tick to compute live seconds-ago indicators
   useEffect(() => {
     const t = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const selectedPatient = patients.find((p) => p.id === selectedPatientId) || patients[0] || WARD_PATIENTS[0];
+  // Keyboard shortcut for Command Palette
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-  const loadData = useCallback(async () => {
-    try {
-      const [plist, v, a, allA] = await Promise.all([
-        fetchPatients(),
-        fetchVitals(selectedPatientId),
-        fetchAlerts(selectedPatientId),
-        fetchAllAlerts(),
-      ]);
-      setPatients(plist);
-      if (plist.length > 0 && !plist.some((p) => p.id === selectedPatientId)) {
+  // Validate session on mount
+  useEffect(() => {
+    if (currentUser?.token) {
+      getCurrentUser()
+        .then((data) => {
+          if (data?.user) {
+            setCurrentUser((prev) => ({ ...prev, ...data.user }));
+          }
+        })
+        .catch((error) => {
+          if (error.response?.status === 401) {
+            localStorage.removeItem('caresense_user');
+            setCurrentUser(null);
+          }
+        });
+    }
+  }, [currentUser?.token]);
+
+  const selectedPatient = useMemo(() => {
+    if (!patients.length) return null;
+    return patients.find((p) => p.id === selectedPatientId) || patients[0];
+  }, [patients, selectedPatientId]);
+
+  const applyTelemetryPayload = useCallback((plist, v, a, allA) => {
+    setPatients(plist);
+    if (plist.length > 0) {
+      const stillValid = selectedPatientId != null && plist.some((p) => p.id === selectedPatientId);
+      if (!stillValid) {
         setSelectedPatientId(plist[0].id);
       }
-      setVitals(v);
-      setAlerts(a);
-      setAllAlerts(allA);
-      setConnError(null);
-      setLastUpdated(new Date());
+    } else {
+      setSelectedPatientId(null);
+    }
+    setVitals(v);
+    setAlerts(a);
+    setAllAlerts(allA);
+    setConnError(null);
+    setLastUpdated(new Date());
 
-      // If there is an active unacknowledged critical alert, trigger the modal
-      const criticalAlert = a.find((item) => item.level === 'CRITICAL' && !item.acknowledged);
-      if (criticalAlert && !activeEmergency) {
-        setActiveEmergency(criticalAlert);
-      }
+    const criticalAlert = a.find(
+      (item) =>
+        item.level === 'CRITICAL' &&
+        item.status === 'NEW' &&
+        !item.acknowledged
+    );
+    if (criticalAlert) {
+      setActiveEmergency((prev) => {
+        if (prev?.id === 999) return prev;
+        if (prev?.id === criticalAlert.id) return prev;
+        return criticalAlert;
+      });
+    }
+  }, [selectedPatientId]);
+
+  const loadData = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const plist = await fetchPatients();
+      const patientKey = selectedPatientId ?? plist[0]?.id;
+      const [v, a, allA] = await Promise.all([
+        fetchVitals(patientKey),
+        fetchAlerts(patientKey),
+        fetchAllAlerts(),
+      ]);
+      applyTelemetryPayload(plist, v, a, allA);
     } catch (err) {
       console.error('Backend connection error:', err);
       setConnError('Cannot reach backend — is Django running at http://localhost:8000?');
     }
-  }, [selectedPatientId, activeEmergency]);
+  }, [selectedPatientId, currentUser, applyTelemetryPayload]);
 
   useEffect(() => {
+    if (!currentUser) return;
     let isMounted = true;
     const poll = async () => {
       try {
-        const [plist, v, a, allA] = await Promise.all([
-          fetchPatients(),
-          fetchVitals(selectedPatientId),
-          fetchAlerts(selectedPatientId),
+        const plist = await fetchPatients();
+        const patientKey = selectedPatientId ?? plist[0]?.id;
+        const [v, a, allA] = await Promise.all([
+          fetchVitals(patientKey),
+          fetchAlerts(patientKey),
           fetchAllAlerts(),
         ]);
         if (isMounted) {
-          setPatients(plist);
-          if (plist.length > 0 && !plist.some((p) => p.id === selectedPatientId)) {
-            setSelectedPatientId(plist[0].id);
-          }
-          setVitals(v);
-          setAlerts(a);
-          setAllAlerts(allA);
-          setConnError(null);
-          setLastUpdated(new Date());
+          applyTelemetryPayload(plist, v, a, allA);
         }
       } catch (err) {
         if (isMounted) {
@@ -119,7 +181,7 @@ export default function App() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [selectedPatientId]);
+  }, [selectedPatientId, currentUser, applyTelemetryPayload]);
 
   const handleAcknowledge = async (id) => {
     if (id !== 999) {
@@ -135,23 +197,51 @@ export default function App() {
     loadData();
   };
 
+  const handleResolve = async (id) => {
+    if (id !== 999) {
+      try {
+        await resolveAlert(id);
+      } catch (err) {
+        console.warn('Alert resolve failed:', err);
+      }
+    }
+    if (activeEmergency && activeEmergency.id === id) {
+      setActiveEmergency(null);
+    }
+    loadData();
+  };
+
   const handleLogin = (user) => {
     setCurrentUser(user);
     localStorage.setItem('caresense_user', JSON.stringify(user));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch {
+      // Continue cleanup
+    }
     setCurrentUser(null);
     localStorage.removeItem('caresense_user');
   };
 
   const handleTriggerEmergencyPreview = () => {
+    const previewReading = latest
+      ? {
+          heart_rate: latest.heart_rate,
+          spo2: latest.spo2,
+          temperature: latest.temperature,
+          motion_flag: latest.motion_flag,
+        }
+      : { heart_rate: 145.0, spo2: 85.0, temperature: 38.9, motion_flag: true };
     setActiveEmergency({
       id: 999,
       level: 'CRITICAL',
-      message: 'HR spike 145 BPM, SpO2 85%, Fall detected',
-      reading: { heart_rate: 145.0, spo2: 85.0, temperature: 38.9, motion_flag: true },
-      channels_sent: 'SMS, Email and Push Notification',
+      status: 'NEW',
+      message: 'Training preview — critical breach simulation',
+      reading: previewReading,
+      channels_sent: 'SMS, Email, Hospital Intercom Siren',
       acknowledged: false,
       created_at: new Date().toISOString(),
     });
@@ -166,75 +256,119 @@ export default function App() {
     ? Math.max(0, Math.floor((currentTime - new Date(latest.received_at).getTime()) / 1000))
     : null;
 
-  let heartbeatStatus = 'OFFLINE';
-  let heartbeatLabel = 'Hardware Offline';
-  let heartbeatClass = 'status-offline';
+  const latestSource = (
+    latest?.source ||
+    (selectedPatient?.data_source === 'SIMULATION' ? 'simulation' : 'hardware')
+  ).toLowerCase();
+  const isSim = latestSource === 'simulation';
 
-  if (lastPacketSec !== null && lastPacketSec < 25) {
-    heartbeatStatus = 'ONLINE';
-    heartbeatLabel = `Live Hardware (${lastPacketSec}s ago)`;
-    heartbeatClass = 'status-online';
-  } else if (lastPacketSec !== null && lastPacketSec < 75) {
-    heartbeatStatus = 'STALE';
-    heartbeatLabel = `Telemetry Stale (${lastPacketSec}s)`;
-    heartbeatClass = 'status-stale';
+  let statusLabel = 'Continuous Monitoring Active';
+  let statusClass = 'chip-online';
+
+  if (isSim) {
+    statusLabel = 'Demonstration Mode';
+    statusClass = 'chip-simulated';
+  } else if (lastPacketSec !== null && lastPacketSec > 120) {
+    statusLabel = 'Standby Mode';
+    statusClass = 'chip-stale';
   }
 
+  const activeAlertsCount = allAlerts.filter((a) => a.status === 'NEW' || !a.acknowledged).length;
+
+  // Sparkline data extractions
+  const hrSparkline = vitals.slice(0, 16).map((v) => Number(v.heart_rate)).reverse();
+  const spo2Sparkline = vitals.slice(0, 16).map((v) => Number(v.spo2)).reverse();
+  const tempSparkline = vitals.slice(0, 16).map((v) => Number(v.temperature)).reverse();
+  const motionSparkline = vitals.slice(0, 16).map((v) => (v.motion_flag ? 2.8 : 1.0)).reverse();
+
+  const hrVal = latest ? Number(latest.heart_rate) : null;
+  const spo2Val = latest ? Number(latest.spo2) : null;
+  const tempVal = latest ? Number(latest.temperature) : null;
+
+  const hrStatusType =
+    hrVal == null ? 'ok' : hrVal > 120 ? 'danger' : hrVal < 50 ? 'watch' : 'ok';
+  const spo2StatusType =
+    spo2Val == null ? 'ok' : spo2Val < 92 ? 'danger' : spo2Val < 95 ? 'watch' : 'ok';
+  const tempStatusType =
+    tempVal == null ? 'ok' : tempVal > 38.5 ? 'danger' : tempVal > 37.5 ? 'watch' : 'ok';
+
   return (
-    <div className="layout-wrapper">
-      {/* Fig. 7.2 Navigation Sidebar */}
+    <div className="layout-master">
+      {/* Navigation Sidebar */}
       <Sidebar
         activeTab={activeTab}
         onTabChange={setActiveTab}
         user={currentUser}
         onLogout={handleLogout}
+        activeAlertsCount={activeAlertsCount}
       />
 
-      {/* Main Content Dashboard */}
-      <main className="main-content">
-        {/* Top Header Bar */}
-        <header className="top-header">
-          <div className="top-header-left">
-            <h1 className="greeting-title">Good afternoon, {currentUser.name}</h1>
-            <p className="status-subtitle">
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-              {' • '}
-              <span className="watch-count">{patients.length} patients monitored in ward</span>
-            </p>
+      {/* Main Clinical Body */}
+      <main className="main-viewport">
+        {/* Clinical Top App Bar */}
+        <header className="clinical-topbar">
+          <div className="topbar-left">
+            <div className="breadcrumb-line">
+              <span className="ward-location">Ward A Inpatient Care</span>
+              <span className="crumb-separator">•</span>
+              <span className="active-nodes-tag tabular-nums">{patients.length} Monitored Patients</span>
+            </div>
+            <h1 className="topbar-heading">
+              {activeTab === 'dashboard' && `Patient Overview — ${selectedPatient?.name || 'Select patient'}`}
+              {activeTab === 'live-vitals' && `Real-Time Vitals — ${selectedPatient?.name || 'Select patient'}`}
+              {activeTab === 'patients' && 'Ward Inpatient Directory'}
+              {activeTab === 'alerts' && 'Patient Incidents & Alerts'}
+              {activeTab === 'reports' && `Shift Summary & Reports — ${selectedPatient?.name}`}
+              {activeTab === 'settings' && `Patient Alert Limits & Preferences — ${selectedPatient?.name}`}
+            </h1>
           </div>
 
-          <div className="top-header-right">
-            {/* Hardware Heartbeat Indicator */}
-            <div
-              className={`hardware-badge ${heartbeatClass}`}
-              data-status={heartbeatStatus}
-              title={`Wearable node ${selectedPatient.device_id} status (${heartbeatStatus})`}
-            >
-              <span className="heartbeat-pulse" />
-              <IconCpu size={14} />
-              <span>{heartbeatLabel}</span>
-            </div>
-
+          <div className="topbar-right">
+            {/* Quick Jump Command Palette Button */}
             <button
               type="button"
-              className="preview-emergency-btn"
-              onClick={handleTriggerEmergencyPreview}
-              title="Preview Fig. 7.3 Emergency Modal"
+              className="topbar-action-btn cmd-btn"
+              onClick={() => setIsCommandPaletteOpen(true)}
+              title="Search or jump (Ctrl+K / ⌘K)"
             >
-              <IconAlertTriangle size={14} />
-              <span>Simulate Emergency Modal</span>
+              <IconSearch size={14} />
+              <span className="cmd-label">Quick Jump</span>
+              <kbd className="kbd-shortcut">⌘K</kbd>
             </button>
 
-            <div className="doctor-pill-badge">
-              <span className="doc-avatar" aria-hidden="true">
+            {/* Theme Toggle Button */}
+            <button
+              type="button"
+              className="topbar-action-btn theme-toggle-btn"
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'light' ? 'Night Ward Mode' : 'Clinical Light Mode'}`}
+            >
+              <IconActivity size={14} />
+              <span>{theme === 'light' ? 'Night Ward' : 'Light Mode'}</span>
+            </button>
+
+            {/* Central System Status Badge */}
+            <div className={`clinical-status-pill ${statusClass}`}>
+              <span className="status-live-dot" />
+              <span>{statusLabel}</span>
+            </div>
+
+            {/* Clinician Profile Dropdown */}
+            <div className="clinician-profile-chip">
+              <div className="profile-avatar">
                 <IconUser size={15} />
-              </span>
-              <span className="doc-name">{currentUser.name}</span>
+              </div>
+              <div className="profile-meta">
+                <span className="profile-name">{currentUser.display_name || currentUser.name || 'Dr. Mehta'}</span>
+                <span className={`profile-role-sub role-${(currentUser.role || 'DOCTOR').toLowerCase()}`}>
+                  {currentUser.role || 'DOCTOR'}
+                </span>
+              </div>
             </div>
           </div>
         </header>
 
-        {/* Patient-Selector Strip (Matches Fig. 7.2) */}
+        {/* Patient Switcher Horizontal Rail */}
         <PatientSelector
           patients={patients}
           selectedPatientId={selectedPatientId}
@@ -242,100 +376,149 @@ export default function App() {
         />
 
         {connError && (
-          <div className="conn-error">
-            <strong>Connection Notice:</strong> {connError}
+          <div className="backend-conn-alert" role="alert">
+            <IconAlertTriangle size={16} />
+            <span>{connError}</span>
           </div>
         )}
 
-        {/* Tab 1: Clinical Dashboard */}
+        {/* TAB 1: Clinical Dashboard */}
         {activeTab === 'dashboard' && (
-          <>
-            {!connError && !latest && (
-              <div className="empty-panel">
-                <IconCpu size={36} color="#94a3b8" />
-                <p className="empty-msg">
-                  Waiting for telemetry reading from <strong>{selectedPatient.name}</strong> ({selectedPatient.device_id})…
+          <div className="dashboard-content-flow">
+            {!connError && patients.length === 0 && (
+              <div className="dashboard-empty-card">
+                <div className="empty-icon-ring">
+                  <IconActivity size={32} color="var(--brand-primary)" />
+                </div>
+                <h3>No Ward Patients Registered</h3>
+                <p>
+                  Run <strong>python manage.py seed_ward</strong> on the backend, or register patients via the API / admin panel.
                 </p>
-                <p className="empty-subtext">
-                  ESP32 firmware pushes every 5 seconds to <code>/api/v1/vitals/</code>. You can also inject telemetry via the <strong>Settings</strong> tab simulator.
+              </div>
+            )}
+
+            {!connError && patients.length > 0 && !latest && selectedPatient && (
+              <div className="dashboard-empty-card">
+                <div className="empty-icon-ring">
+                  <IconActivity size={32} color="var(--brand-primary)" />
+                </div>
+                <h3>Awaiting Patient Telemetry</h3>
+                <p>
+                  Connecting to bedside monitor for <strong>{selectedPatient.name}</strong> (Bed {selectedPatient.room || selectedPatient.id}).
                 </p>
+                <span className="empty-subnote">
+                  Continuous vital sign telemetry will appear here automatically. You can also evaluate simulated patient conditions from the <strong>Settings</strong> tab.
+                </span>
               </div>
             )}
 
             {latest && (
               <>
-                {/* 4 Vital Cards Grid (Matches Fig. 7.2) */}
-                <section className="vitals-grid" aria-label="Vital Signs Grid">
+                {/* 4 Equal-Height KPI Vitals Cards */}
+                <section className="kpi-vitals-grid" aria-label="Biometric KPI Readouts">
+                  {/* Heart Rate Card */}
                   <VitalCard
                     label="Heart Rate"
-                    value={latest.heart_rate.toFixed(0)}
+                    value={hrVal != null ? hrVal.toFixed(0) : '—'}
                     unit="BPM"
-                    normalRange="Normal (60-100)"
-                    statusColor={statusColor(latest.heart_rate, (v) => v < 50 || v > 120)}
+                    normalRange="Normal (50–120 BPM)"
+                    statusType={hrStatusType}
+                    sparklineData={hrSparkline}
+                    metricKey="hr"
                   />
+
+                  {/* Blood Oxygen SpO2 Card */}
                   <VitalCard
-                    label="SpO2"
-                    value={latest.spo2.toFixed(0)}
+                    label="Blood Oxygen (SpO2)"
+                    value={spo2Val != null ? spo2Val.toFixed(1) : '—'}
                     unit="%"
-                    normalRange="Normal (≥95%)"
-                    statusColor={statusColor(latest.spo2, (v) => v < 92)}
+                    normalRange="Clinical Boundary (≥92%)"
+                    statusType={spo2StatusType}
+                    sparklineData={spo2Sparkline}
+                    metricKey="spo2"
                   />
+
+                  {/* Body Temperature Card */}
                   <VitalCard
-                    label="Temperature"
-                    value={latest.temperature.toFixed(1)}
+                    label="Skin Temperature"
+                    value={tempVal != null ? tempVal.toFixed(1) : '—'}
                     unit="°C"
-                    normalRange="Normal (36.1-37.2)"
-                    statusColor={statusColor(latest.temperature, (v) => v > 38.5)}
+                    normalRange="Normothermia (36.0–37.8°C)"
+                    statusType={tempStatusType}
+                    sparklineData={tempSparkline}
+                    metricKey="temp"
                   />
+
+                  {/* 3-Axis Motion / Fall Gauge Card */}
                   <VitalCard
-                    label="Motion / Fall"
-                    value={latest.motion_flag ? 'Fall detected' : 'Stable'}
-                    unit=""
-                    normalRange="No fall detected"
-                    statusColor={latest.motion_flag ? '#dc2626' : '#16a34a'}
+                    label="Patient Activity & Posture"
+                    value={latest.motion_flag ? 'Fall' : '1.02'}
+                    unit="G"
+                    normalRange="Normal (Resting in Bed • Zero Impact)"
+                    statusType={latest.motion_flag ? 'danger' : 'ok'}
+                    sparklineData={motionSparkline}
+                    metricKey="motion"
+                    isMotionCard={true}
+                    motionFlag={Boolean(latest.motion_flag)}
+                    accelMagnitude={latest.motion_flag ? 2.85 : 1.02}
                   />
                 </section>
 
-                {/* Middle Row: Trend Chart (Left) + Alert Log (Right) */}
-                <div className="middle-row-grid">
-                  <section className="panel chart-panel">
-                    <div className="panel-header">
-                      <h2>Heart Rate — Recent Telemetry Trend</h2>
-                      <span className="threshold-legend">Threshold: 120 BPM</span>
+                {/* Primary Data Grid: Left (65%) Trend Chart + Right (35%) Live Alert Feed */}
+                <div className="dashboard-charts-row">
+                  {/* Left: Recharts Multi-Range Trend Chart */}
+                  <section className="dashboard-chart-card">
+                    <div className="card-top-title-row">
+                      <div>
+                        <h3>Physiological Vital Trends</h3>
+                        <p className="chart-subhead">Continuous pulse-oximetry and heart-rate monitoring</p>
+                      </div>
+                      <span className="threshold-boundary-tag">Safe: 50–120 BPM • SpO2 ≥92%</span>
                     </div>
                     <HeartRateChart vitals={vitals} />
                   </section>
 
-                  <section className="panel alerts-panel">
-                    <div className="panel-header">
-                      <h2>Patient Alert Log</h2>
+                  {/* Right: Live Patient Incident Feed */}
+                  <section className="dashboard-alerts-card">
+                    <div className="card-top-title-row">
+                      <div>
+                        <h3>Patient Incident Log</h3>
+                        <p className="chart-subhead">Patient-specific physiological alerts</p>
+                      </div>
                       {lastUpdated && (
-                        <span className="last-sync">Sync: {lastUpdated.toLocaleTimeString()}</span>
+                        <span className="sync-time-stamp tabular-nums">
+                          Sync: {lastUpdated.toLocaleTimeString()}
+                        </span>
                       )}
                     </div>
                     <AlertLog alerts={alerts} onAcknowledge={handleAcknowledge} />
                   </section>
                 </div>
 
-                {/* Bottom Row: Patient History Table */}
-                <section className="panel history-panel">
-                  <div className="panel-header">
-                    <h2>Patient History (Recent Readings)</h2>
-                    <span className="panel-tag">{selectedPatient.name} — Room {selectedPatient.room || 'PT-0142'}</span>
+                {/* Bottom Row: Patient Telemetry History Table */}
+                <section className="dashboard-history-card">
+                  <div className="card-top-title-row">
+                    <div>
+                      <h3>Recent Vitals Recording Log</h3>
+                      <p className="chart-subhead">Continuous vital sign readings recorded during current shift</p>
+                    </div>
+                    <span className="history-node-tag">
+                      Bed {selectedPatient?.room || selectedPatient?.id || '—'} • Ward A
+                    </span>
                   </div>
-                  <HistoryTable vitals={vitals.slice(0, 5)} />
+                  <HistoryTable vitals={vitals.slice(0, 8)} />
                 </section>
               </>
             )}
-          </>
+          </div>
         )}
 
-        {/* Tab 2: Raw Live Vitals & Sensor Telemetry */}
+        {/* TAB 2: Live Vitals & Sensor Diagnostics */}
         {activeTab === 'live-vitals' && (
-          <LiveVitalsTab patient={selectedPatient} latestVital={latest} vitals={vitals} />
+          <LiveVitalsTab patient={selectedPatient} latestVital={latest} clinician={currentUser} />
         )}
 
-        {/* Tab 3: Complete Ward Patients Directory */}
+        {/* TAB 3: Ward Patients Directory */}
         {activeTab === 'patients' && (
           <PatientsTab
             patients={patients}
@@ -347,31 +530,57 @@ export default function App() {
           />
         )}
 
-        {/* Tab 4: Ward Alert Audit Trail */}
+        {/* TAB 4: Ward Alerts & Audit Trail */}
         {activeTab === 'alerts' && (
-          <AlertsTab alerts={allAlerts} onAcknowledge={handleAcknowledge} />
+          <AlertsTab
+            alerts={allAlerts}
+            onAcknowledge={handleAcknowledge}
+            onResolve={handleResolve}
+          />
         )}
 
-        {/* Tab 5: Shift Reports & Clinical Export */}
+        {/* TAB 5: Shift Reports & Clinical Export */}
         {activeTab === 'reports' && (
           <ReportsTab patient={selectedPatient} vitals={vitals} alerts={alerts} />
         )}
 
-        {/* Tab 6: System Configuration & Telemetry Simulator */}
-        {activeTab === 'settings' && (
-          <SettingsTab patient={selectedPatient} onRefreshData={loadData} />
+        {/* TAB 6: Settings, Thresholds & Simulator */}
+        {activeTab === 'settings' && selectedPatient && (
+          <SettingsTab
+            patient={selectedPatient}
+            onRefreshData={loadData}
+            user={currentUser}
+          />
+        )}
+        {activeTab === 'settings' && !selectedPatient && (
+          <div className="dashboard-empty-card">
+            <h3>Select a patient</h3>
+            <p>Choose a ward patient from the rail above to configure alert limits.</p>
+          </div>
         )}
       </main>
 
-      {/* Fig. 7.3 Full-Screen Emergency Alert Modal */}
+      {/* Emergency Code Blue Takeover Modal */}
       {activeEmergency && (
         <EmergencyModal
           alert={activeEmergency}
           patient={selectedPatient}
           onClose={() => setActiveEmergency(null)}
           onAcknowledge={handleAcknowledge}
+          onViewVitals={() => setActiveTab('live-vitals')}
         />
       )}
+
+      {/* Quick Jump Command Palette (Ctrl+K / ⌘K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        patients={patients}
+        onSelectPatient={(id) => setSelectedPatientId(id)}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        onTriggerEmergency={handleTriggerEmergencyPreview}
+        onToggleTheme={toggleTheme}
+      />
     </div>
   );
 }
