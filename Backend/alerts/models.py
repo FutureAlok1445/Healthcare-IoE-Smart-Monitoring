@@ -11,6 +11,7 @@ class Alert(models.Model):
     reading = models.ForeignKey(VitalReading, on_delete=models.CASCADE, related_name='alerts')
     level = models.CharField(max_length=10, choices=LEVEL_CHOICES)
     message = models.TextField()
+    channels_sent = models.CharField(max_length=255, default='SMS, Email, Push Notification')
     acknowledged = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
