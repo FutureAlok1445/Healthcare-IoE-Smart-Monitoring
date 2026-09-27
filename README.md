@@ -1,0 +1,195 @@
+# Healthcare-IoE: Smart Patient Health Monitoring System
+
+An end-to-end, medical IoT / IoE (Internet of Everything) continuous patient monitoring platform. The system acquires real-time vital signs from multiple wearable sensors via an ESP32 microcontroller, performs edge-level breach and fall detection, and streams telemetry over Wi-Fi to a robust Django REST backend with automated alert latching.
+
+---
+
+## 🌟 Key Features
+
+* **Multi-Sensor Edge Ingestion:**
+  * **DS18B20:** High-precision digital body temperature (non-blocking, asynchronous conversion).
+  * **MPU-6050:** 6-axis accelerometer & gyroscope for impact and free-fall detection.
+  * **MAX30102:** Pulse oximetry & optical heart rate (I2C interface).
+  * **Emergency SOS:** Hardware push-button with active-low software debouncing and immediate critical latching.
+* **Firmware Resilience:**
+  * Multi-state alert machine (`NORMAL`, `WATCH`, `CRITICAL`) driving dedicated status LEDs and audible buzzer patterns.
+  * 5-slot circular FIFO buffer preserving telemetry during Wi-Fi or server dropouts, flushing automatically upon reconnection.
+  * Interactive serial CLI (`help`, `status`, `force`, `clear`) for hardware debugging.
+* **Production-Grade Django Backend:**
+  * Auto-provisioning of patient profiles upon first device connection.
+  * Smart Alert Latching & Anti-Flooding: Updates active alerts in-place rather than generating duplicate database rows every 5 seconds.
+  * Dual-identifier URL resolution (accepts numeric primary key or hardware `device_id`).
+  * Full 32-bit unsigned `millis()` timestamp ingestion support.
+  * Central alert monitoring feed with acknowledgment endpoints.
+
+---
+
+## 📐 System Architecture
+
+```text
+ [ DS18B20 Temp ]  \
+ [ MPU-6050 IMU ]   ->  [ ESP32 NodeMCU-32S ]  ---( Wi-Fi HTTP POST )--->  [ Django REST API ]
+ [ MAX30102 PPG ]  /      | Status LEDs                                            | SQLite / PostgreSQL
+ [ SOS Pushbutton] /       | Buzzer Alarm                                          v
+                           | Local Ring Buffer                            [ Doctor / Nurse Dashboard ]
+```
+
+---
+
+## 🔌 Hardware Pinout & Wiring
+
+| Component | ESP32 GPIO | Description |
+|---|---|---|
+| **DS18B20 Data** | `GPIO 4` | OneWire bus (4.7kΩ pull-up to 3.3V) |
+| **MPU-6050 / MAX30102 SDA** | `GPIO 21` | Shared I2C SDA (4.7kΩ pull-up to 3.3V) |
+| **MPU-6050 / MAX30102 SCL** | `GPIO 22` | Shared I2C SCL (4.7kΩ pull-up to 3.3V) |
+| **SOS Push-Button** | `GPIO 27` | Active-low with internal pull-up (`INPUT_PULLUP`) |
+| **Status LED: Green** | `GPIO 25` | Normal vital status (220Ω series resistor) |
+| **Status LED: Yellow** | `GPIO 26` | Watch / Warning status (220Ω series resistor) |
+| **Status LED: Red** | `GPIO 32` | Critical / SOS alert (220Ω series resistor) |
+| **Piezo Buzzer** | `GPIO 18` | Audible alert driver |
+
+Complete schematics and breadboard wiring definitions are located in [`schematic/main.sch`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/schematic/main.sch) and [`wiring/wiring.json`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/wiring/wiring.json).
+
+---
+
+## 🛠️ Summary of Audit Improvements & Fixes
+
+Every subsystem has been thoroughly audited, verified against the circuit schematic, and tested end-to-end:
+
+1. **Firmware Timing & Non-Blocking Conversions:**
+   * Converted DS18B20 to asynchronous non-blocking conversion (`setWaitForConversion(false)`), eliminating ~750ms CPU blocking and ensuring uninterrupted buzzer drive and instantaneous SOS button debouncing.
+   * Fixed `max30102Check()` ternary evaluation bug to properly validate part IDs (`0x15` and `0x11`).
+   * Added 85°C power-on reset filtering and extended Wi-Fi DHCP retry lease to 16 cycles (8s) with dynamic serial logging.
+   * Maintained 100% byte-for-byte synchronization between PlatformIO (`src/main.cpp`) and Arduino IDE (`HealthMonitor/HealthMonitor.ino`).
+
+2. **Backend Engine & API Resilience:**
+   * Implemented smart alert latching and **WATCH $\rightarrow$ CRITICAL escalation**: updates existing alerts in-place to prevent database flooding while seamlessly escalating severity without inflating active alert counts.
+   * Extended telemetry timestamp validation to the full 32-bit unsigned range (`0` to `4,294,967,295`) for ESP32 `millis()`.
+   * Added complete patient management APIs (`GET/POST /api/v1/patients/`, `GET/PATCH /api/v1/patients/<id_or_device>/`) and central alert feed (`GET /api/v1/alerts/`).
+   * Implemented strict multi-patient isolation with intelligent prototype fallback: verifies patient existence first so registered patients with 0 readings never leak another patient's data; safely falls back for unconfigured single-node prototypes only when `count == 1`. Covered by 9 automated tests.
+
+3. **Frontend Dashboard ("CareSense IoE"):**
+   * Audited React 19 + Vite dashboard: resolved all static analysis and lifecycle warnings (`npm run lint` yields 0 warnings, 0 errors).
+   * Verified live end-to-end telemetry rendering, Recharts heart rate trend plotting, and one-click alert acknowledgment in real time.
+
+4. **Clean Distribution Archive:**
+   * A ready-to-deploy, clean zip archive `Healthcare-IoE.zip` is maintained at the project root and parent folder (excluding `venv/`, `node_modules/`, `db.sqlite3`, `dist/`, and cache directories).
+
+---
+
+## 📁 Repository Structure
+
+```text
+Healthcare-IoE/
+├── Backend/                    # Django & DRF Backend Service
+│   ├── alerts/                 # Alert generation & acknowledgment
+│   ├── patients/               # Patient registry & profile management
+│   ├── vitals/                 # Telemetry ingestion & vital records
+│   ├── healthcare_backend/     # Django settings, WSGI/ASGI, root URLs
+│   ├── manage.py               # Django management CLI
+│   ├── requirements.txt        # Python package dependencies
+│   └── README.md               # Backend-specific documentation
+├── Frontend/                   # React + Vite Dashboard ("CareSense IoE")
+│   ├── src/                    # Components (VitalCard, HeartRateChart, AlertLog, HistoryTable)
+│   ├── public/                 # Static assets & icons
+│   ├── package.json            # Dependencies (React, Recharts, Axios)
+│   ├── vite.config.js          # Vite configuration
+│   └── README.md               # Frontend setup guide
+├── HealthMonitor/              # Arduino IDE Firmware
+│   ├── HealthMonitor.ino       # Main sketch file
+│   └── config.h                # Hardware pins, timings, Wi-Fi config
+├── src/                        # PlatformIO Firmware (synchronized with HealthMonitor)
+│   ├── main.cpp                # Firmware entry point
+│   └── config.h                # Pin & network definitions
+├── schematic/                  # Circuit schematic definitions
+│   └── main.sch                # JSON schematic symbol & wire maps
+├── wiring/                     # Physical layout & simulator wiring
+│   └── wiring.json             # Breadboard coordinates and wiring rails
+├── docs/                       # Reports and specifications
+├── platformio.ini              # PlatformIO build configuration
+├── CHANGES-README.md           # Detailed audit and changes log
+├── FIX-NOTES.md                # Circuit audit & restoration history
+└── README.md                   # Project overview & documentation
+```
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Setting Up the Backend
+
+```powershell
+# Navigate to the backend folder
+cd Backend
+
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+.\venv\Scripts\activate       # Windows PowerShell
+# source venv/bin/activate    # Linux / macOS
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run database migrations
+python manage.py migrate
+
+# Start the local development server
+python manage.py runserver
+```
+The server will start at: `http://127.0.0.1:8000/api/v1/`
+
+### 2. Setting Up the Frontend Dashboard
+
+```powershell
+# Open a new terminal and navigate to the frontend folder
+cd Frontend
+
+# Install npm dependencies
+npm install
+
+# Start the Vite development server
+npm run dev
+```
+The dashboard will open at: `http://localhost:5173/`
+
+### 3. Running Automated Tests
+
+To verify backend routing, serializer validations, alert anti-flooding, and patient APIs:
+```powershell
+cd Backend
+python manage.py test
+```
+
+### 4. Flashing the Firmware
+
+1. Open [`src/config.h`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/src/config.h) or [`HealthMonitor/config.h`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/HealthMonitor/config.h).
+2. Update `WIFI_SSID`, `WIFI_PASSWORD`, and `BACKEND_URL` (e.g., `http://<YOUR_LOCAL_IP>:8000/api/v1/vitals/`).
+3. Compile and flash using either:
+   * **PlatformIO:** Open workspace in VS Code with PlatformIO, click **Build** -> **Upload**.
+   * **Arduino IDE:** Open `HealthMonitor/HealthMonitor.ino`, select board `ESP32 Dev Module`, and click **Upload**.
+
+---
+
+## 📡 REST API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/vitals/` | Telemetry ingestion endpoint for the ESP32 |
+| `GET` | `/api/v1/patients/` | List all registered patients with latest vitals & alert summary |
+| `GET` | `/api/v1/patients/<id_or_device>/` | Retrieve patient profile by numeric ID or device string |
+| `PATCH` | `/api/v1/patients/<id_or_device>/` | Update patient profile details |
+| `GET` | `/api/v1/patients/<id_or_device>/vitals/` | Recent vital history (up to 100 entries) |
+| `GET` | `/api/v1/patients/<id_or_device>/alerts/` | Alert history for a specific patient |
+| `GET` | `/api/v1/alerts/` | Global alerts feed (filter with `?acknowledged=false`) |
+| `POST` | `/api/v1/alerts/<id>/acknowledge/` | Acknowledge an active alert |
+
+---
+
+## 📄 Audit & History Documentation
+
+For full details on recent fixes, non-blocking sensor timing optimizations, and architecture updates:
+* [`CHANGES-README.md`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/CHANGES-README.md): Comprehensive log of firmware & backend logic improvements and test results.
+* [`FIX-NOTES.md`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/FIX-NOTES.md): Hardware audit detailing restoration of the MAX30102 sensor and I2C pull-up resistors.
