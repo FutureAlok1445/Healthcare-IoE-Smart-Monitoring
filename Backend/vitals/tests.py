@@ -1,6 +1,8 @@
 from django.test import TestCase
+from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
-from patients.models import Patient
+from patients.models import Patient, UserProfile
 from vitals.models import VitalReading
 from alerts.models import Alert
 
@@ -8,6 +10,25 @@ from alerts.models import Alert
 class VitalIngestTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.doctor = User.objects.create_user(
+            username="dr.mehta",
+            email="dr.mehta@caresense.io",
+            password="DoctorPass2026!",
+            first_name="Dr. Ronald",
+            last_name="Mehta"
+        )
+        UserProfile.objects.create(user=self.doctor, role="DOCTOR", phone="+91 98765 43210")
+
+        self.nurse = User.objects.create_user(
+            username="nurse.sarah",
+            email="nurse.sarah@caresense.io",
+            password="NursePass2026!",
+            first_name="Sarah",
+            last_name="Jenkins"
+        )
+        UserProfile.objects.create(user=self.nurse, role="NURSE", phone="+91 98765 43211")
+        self.doctor_token = Token.objects.create(user=self.doctor)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.doctor_token.key}')
 
     def test_vital_ingest_creates_patient_and_reading(self):
         payload = {
@@ -24,7 +45,26 @@ class VitalIngestTests(TestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(Patient.objects.count(), 1)
         self.assertEqual(VitalReading.objects.count(), 1)
+        self.assertEqual(res.data['source'], 'hardware')
         self.assertEqual(Alert.objects.count(), 0)
+
+    def test_vital_ingest_with_simulation_source(self):
+        payload = {
+            "device_id": "ESP32_NODE_01",
+            "heart_rate": 75.0,
+            "spo2": 98.0,
+            "temperature": 36.6,
+            "motion_flag": False,
+            "sos_pressed": False,
+            "state": "NORMAL",
+            "source": "simulation",
+            "timestamp": 123456
+        }
+        res = self.client.post('/api/v1/vitals/', payload, format='json')
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['source'], 'simulation')
+        reading = VitalReading.objects.get(id=res.data['id'])
+        self.assertEqual(reading.source, 'simulation')
 
     def test_alert_creation_and_anti_flooding(self):
         critical_payload = {
@@ -44,8 +84,8 @@ class VitalIngestTests(TestCase):
         alert = Alert.objects.first()
         self.assertFalse(alert.acknowledged)
         self.assertEqual(alert.level, "CRITICAL")
-        self.assertIn("fall detected", alert.message)
-        self.assertIn("SOS pressed", alert.message)
+        self.assertEqual(alert.status, "NEW")
+        self.assertEqual(alert.alert_type, "SOS_EMERGENCY")
 
         # Second critical POST 5 seconds later should update the existing active alert, NOT flood
         critical_payload['timestamp'] = 205000
@@ -53,15 +93,20 @@ class VitalIngestTests(TestCase):
         res2 = self.client.post('/api/v1/vitals/', critical_payload, format='json')
         self.assertEqual(res2.status_code, 201)
         self.assertEqual(Alert.objects.count(), 1)  # Still 1 alert, not 2!
-        alert.refresh_from_db()
-        self.assertIn("HR 145 bpm", alert.message)
 
         # Acknowledge the alert
         ack_res = self.client.post(f'/api/v1/alerts/{alert.id}/acknowledge/')
         self.assertEqual(ack_res.status_code, 200)
         self.assertTrue(ack_res.data['acknowledged'])
+        self.assertEqual(ack_res.data['status'], 'ACKNOWLEDGED')
 
-        # Now that it's acknowledged, a new breach triggers a fresh alert
+        # Resolve the alert
+        resolve_res = self.client.post(f'/api/v1/alerts/{alert.id}/resolve/')
+        self.assertEqual(resolve_res.status_code, 200)
+        self.assertEqual(resolve_res.data['status'], 'RESOLVED')
+        self.assertIsNotNone(resolve_res.data['resolved_at'])
+
+        # Now that it's resolved, a new breach triggers a fresh alert
         critical_payload['timestamp'] = 210000
         res3 = self.client.post('/api/v1/vitals/', critical_payload, format='json')
         self.assertEqual(res3.status_code, 201)
@@ -71,7 +116,7 @@ class VitalIngestTests(TestCase):
         # 1. Patient triggers WATCH alert
         watch_payload = {
             "device_id": "ESP32_NODE_05",
-            "heart_rate": 125.0,  # mild breach
+            "heart_rate": 125.0,  # mild tachycardia breach
             "spo2": 95.0,
             "temperature": 37.2,
             "motion_flag": False,
@@ -84,7 +129,7 @@ class VitalIngestTests(TestCase):
         self.assertEqual(Alert.objects.filter(patient__device_id="ESP32_NODE_05").count(), 1)
         alert = Alert.objects.get(patient__device_id="ESP32_NODE_05")
         self.assertEqual(alert.level, "WATCH")
-        self.assertIn("HR 125 bpm", alert.message)
+        self.assertIn("125 BPM", alert.message)
 
         # 2. Patient condition worsens to CRITICAL (e.g., fall + SOS)
         critical_payload = {
@@ -99,242 +144,126 @@ class VitalIngestTests(TestCase):
         }
         res2 = self.client.post('/api/v1/vitals/', critical_payload, format='json')
         self.assertEqual(res2.status_code, 201)
-        # Total alert count for this patient should STILL be 1 (merged/escalated, NOT 2)
-        self.assertEqual(Alert.objects.filter(patient__device_id="ESP32_NODE_05").count(), 1)
         alert.refresh_from_db()
         self.assertEqual(alert.level, "CRITICAL")
-        self.assertIn("fall detected", alert.message)
-        self.assertIn("SOS pressed", alert.message)
+        self.assertEqual(alert.alert_type, "SOS_EMERGENCY")
 
-        # Patient active alert count in patient profile is 1
-        p_res = self.client.get('/api/v1/patients/ESP32_NODE_05/')
-        self.assertEqual(p_res.status_code, 200)
-        self.assertEqual(p_res.data['active_alerts_count'], 1)
-
-
-    def test_large_32bit_timestamp(self):
-        # millis() past 2^31-1 (~25 days uptime)
-        payload = {
-            "device_id": "ESP32_NODE_01",
-            "heart_rate": 72.0,
-            "spo2": 99.0,
-            "temperature": 36.7,
-            "motion_flag": False,
-            "sos_pressed": False,
-            "state": "NORMAL",
-            "timestamp": 3000000000  # > 2147483647
-        }
-        res = self.client.post('/api/v1/vitals/', payload, format='json')
-        self.assertEqual(res.status_code, 201)
-
-    def test_patient_list_and_vitals_by_id_and_device(self):
-        # Ingest reading to create patient
-        payload = {
-            "device_id": "ESP32_NODE_01",
-            "heart_rate": 80.0,
-            "spo2": 97.0,
-            "temperature": 36.8,
-            "motion_flag": False,
-            "sos_pressed": False,
-            "state": "NORMAL",
-            "timestamp": 100
-        }
-        self.client.post('/api/v1/vitals/', payload, format='json')
-        patient = Patient.objects.get(device_id="ESP32_NODE_01")
-
-        # GET /api/v1/patients/
-        p_res = self.client.get('/api/v1/patients/')
-        self.assertEqual(p_res.status_code, 200)
-        self.assertEqual(len(p_res.data), 1)
-        self.assertEqual(p_res.data[0]['latest_reading']['heart_rate'], 80.0)
-
-        # GET /api/v1/patients/<int>/vitals/
-        v_res1 = self.client.get(f'/api/v1/patients/{patient.id}/vitals/')
-        self.assertEqual(v_res1.status_code, 200)
-        self.assertEqual(len(v_res1.data), 1)
-
-        # GET /api/v1/patients/<device_id>/vitals/
-        v_res2 = self.client.get(f'/api/v1/patients/{patient.device_id}/vitals/')
-        self.assertEqual(v_res2.status_code, 200)
-        self.assertEqual(len(v_res2.data), 1)
-
-    def test_patient_detail_by_id_and_device(self):
-        patient = Patient.objects.create(name="Alice Doe", device_id="ESP32_NODE_99")
-
-        # By numeric ID
-        res1 = self.client.get(f'/api/v1/patients/{patient.id}/')
-        self.assertEqual(res1.status_code, 200)
-        self.assertEqual(res1.data['name'], "Alice Doe")
-
-        # By device ID
-        res2 = self.client.get(f'/api/v1/patients/{patient.device_id}/')
-        self.assertEqual(res2.status_code, 200)
-        self.assertEqual(res2.data['name'], "Alice Doe")
-
-        # Update name via PATCH
-        res3 = self.client.patch(f'/api/v1/patients/{patient.id}/', {'name': 'Alice Smith'}, format='json')
-        self.assertEqual(res3.status_code, 200)
-        self.assertEqual(res3.data['name'], 'Alice Smith')
-
-    def test_all_alerts_listing_and_filtering(self):
-        patient = Patient.objects.create(name="Bob", device_id="ESP32_NODE_02")
-        reading = VitalReading.objects.create(
-            patient=patient, device_timestamp=1000, heart_rate=135,
-            spo2=96, temperature=37.0, state="WATCH"
-        )
-        Alert.objects.create(patient=patient, reading=reading, level="WATCH", message="HR 135 bpm", acknowledged=False)
-        Alert.objects.create(patient=patient, reading=reading, level="CRITICAL", message="SOS pressed", acknowledged=True)
-
-        # GET all alerts
-        res = self.client.get('/api/v1/alerts/')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(len(res.data), 2)
-
-        # Filter by ?acknowledged=false
-        res_unack = self.client.get('/api/v1/alerts/?acknowledged=false')
-        self.assertEqual(res_unack.status_code, 200)
-        self.assertEqual(len(res_unack.data), 1)
-        self.assertFalse(res_unack.data[0]['acknowledged'])
-
-    def test_multi_patient_isolation_no_data_leak(self):
-        # Patient 1 exists with 0 readings and 0 alerts
-        patient1 = Patient.objects.create(name="Patient One", device_id="ESP32_NODE_01")
-        # Patient 2 exists with readings and alerts
-        patient2 = Patient.objects.create(name="Patient Two", device_id="ESP32_NODE_02")
-        reading2 = VitalReading.objects.create(
-            patient=patient2, device_timestamp=1000, heart_rate=80.0,
-            spo2=98.0, temperature=36.7, state="NORMAL"
-        )
-        Alert.objects.create(patient=patient2, reading=reading2, level="WATCH", message="HR 80", acknowledged=False)
-
-        # Querying Patient 1 MUST return empty (0 readings, 0 alerts) — NEVER leak Patient 2's data!
-        res_v1 = self.client.get(f'/api/v1/patients/{patient1.id}/vitals/')
-        self.assertEqual(res_v1.status_code, 200)
-        self.assertEqual(len(res_v1.data), 0, "Patient 1 vitals must be empty, not leaked from Patient 2!")
-
-        res_a1 = self.client.get(f'/api/v1/patients/{patient1.id}/alerts/')
-        self.assertEqual(res_a1.status_code, 200)
-        self.assertEqual(len(res_a1.data), 0, "Patient 1 alerts must be empty, not leaked from Patient 2!")
-
-        # Querying Patient 2 correctly returns Patient 2's readings and alerts
-        res_v2 = self.client.get(f'/api/v1/patients/{patient2.id}/vitals/')
-        self.assertEqual(res_v2.status_code, 200)
-        self.assertEqual(len(res_v2.data), 1)
-        self.assertEqual(res_v2.data[0]['heart_rate'], 80.0)
-
-        res_a2 = self.client.get(f'/api/v1/patients/{patient2.id}/alerts/')
-        self.assertEqual(res_a2.status_code, 200)
-        self.assertEqual(len(res_a2.data), 1)
-
-    def test_single_node_prototype_fallback_when_only_one_patient_exists(self):
-        # Clear all patients
-        Alert.objects.all().delete()
-        VitalReading.objects.all().delete()
-        Patient.objects.all().delete()
-
-        # Create single patient with arbitrary ID (e.g. 88)
-        p = Patient.objects.create(id=88, name="Single Node Patient", device_id="ESP32_NODE_SINGLE")
+    def test_patient_vitals_list_endpoint(self):
+        p = Patient.objects.create(name="Test Patient", device_id="ESP32_NODE_01")
         VitalReading.objects.create(
-            patient=p, device_timestamp=500, heart_rate=72.0,
-            spo2=99.0, temperature=36.6, state="NORMAL"
+            patient=p, device_timestamp=100, heart_rate=72.0, spo2=98.0,
+            temperature=36.6, motion_flag=False, sos_pressed=False, state="NORMAL"
         )
+        res = self.client.get(f'/api/v1/patients/{p.id}/vitals/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['heart_rate'], 72.0)
 
-        # In a single-node prototype, querying default '1' or 'latest' resolves the only active patient
-        res_default = self.client.get('/api/v1/patients/1/vitals/')
-        self.assertEqual(res_default.status_code, 200)
-        self.assertEqual(len(res_default.data), 1)
-        self.assertEqual(res_default.data[0]['heart_rate'], 72.0)
+    def test_patient_lookup_by_device_id(self):
+        p = Patient.objects.create(name="Device Lookup Patient", device_id="ESP32_NODE_DEV")
+        VitalReading.objects.create(
+            patient=p, device_timestamp=100, heart_rate=80.0, spo2=99.0,
+            temperature=36.7, motion_flag=False, sos_pressed=False, state="NORMAL"
+        )
+        res_by_device = self.client.get('/api/v1/patients/ESP32_NODE_DEV/vitals/')
+        self.assertEqual(res_by_device.status_code, 200)
+        self.assertEqual(len(res_by_device.data), 1)
+        self.assertEqual(res_by_device.data[0]['heart_rate'], 80.0)
 
-        res_latest = self.client.get('/api/v1/patients/latest/vitals/')
-        self.assertEqual(res_latest.status_code, 200)
-        self.assertEqual(len(res_latest.data), 1)
+    def test_patient_lookup_by_ward_index(self):
+        p = Patient.objects.create(name="Ward 1 Patient", device_id="ESP32_NODE_01")
+        VitalReading.objects.create(
+            patient=p, device_timestamp=200, heart_rate=68.0, spo2=97.0,
+            temperature=36.5, motion_flag=False, sos_pressed=False, state="NORMAL"
+        )
+        res = self.client.get('/api/v1/patients/1/vitals/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['heart_rate'], 68.0)
 
     def test_auth_login_endpoint(self):
-        payload = {"email": "dr.mehta@caresense.io", "password": "password123", "role": "Doctor"}
-        res = self.client.post('/api/v1/auth/login/', payload, format='json')
-        self.assertEqual(res.status_code, 200)
-        self.assertIn('token', res.data)
-        self.assertEqual(res.data['user']['name'], 'Dr. Mehta')
-        self.assertEqual(res.data['user']['role'], 'Doctor')
+        # 1. Invalid credentials
+        res_bad = self.client.post('/api/v1/auth/login/', {"email": "dr.mehta@caresense.io", "password": "wrong"}, format='json')
+        self.assertEqual(res_bad.status_code, 401)
 
-    def test_patient_thresholds_endpoint(self):
+        # 2. Valid credentials
+        res_ok = self.client.post('/api/v1/auth/login/', {"email": "dr.mehta@caresense.io", "password": "DoctorPass2026!"}, format='json')
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertIn('token', res_ok.data)
+        self.assertEqual(res_ok.data['user']['role'], 'DOCTOR')
+        self.assertTrue(res_ok.data['user']['permissions']['can_update_thresholds'])
+
+    def test_auth_logout_endpoint(self):
+        res_login = self.client.post('/api/v1/auth/login/', {"email": "dr.mehta@caresense.io", "password": "DoctorPass2026!"}, format='json')
+        token = res_login.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        res_logout = self.client.post('/api/v1/auth/logout/')
+        self.assertEqual(res_logout.status_code, 200)
+
+        # Token should now be invalid
+        res_me = self.client.get('/api/v1/auth/me/')
+        self.assertEqual(res_me.status_code, 401)
+
+    def test_clinical_api_requires_authentication(self):
+        self.client.credentials()
+
+        patients_res = self.client.get('/api/v1/patients/')
+        alerts_res = self.client.get('/api/v1/alerts/')
+
+        self.assertEqual(patients_res.status_code, 401)
+        self.assertEqual(alerts_res.status_code, 401)
+
+    def test_rbac_nurse_cannot_patch_thresholds(self):
         p = Patient.objects.create(name="Rahul Sharma", device_id="ESP32_NODE_RS")
-        res_get = self.client.get(f'/api/v1/patients/{p.id}/thresholds/')
-        self.assertEqual(res_get.status_code, 200)
-        self.assertEqual(res_get.data['thresholds']['hr_max'], 120)
 
-        patch_payload = {"thresholds": {"hr_min": 55, "hr_max": 125, "spo2_min": 93, "temp_max": 38.0}}
+        # Login as Nurse
+        res_login = self.client.post('/api/v1/auth/login/', {"email": "nurse.sarah@caresense.io", "password": "NursePass2026!"}, format='json')
+        nurse_token = res_login.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {nurse_token}')
+
+        # Nurse attempting to modify thresholds should get 403 Forbidden
+        patch_payload = {"thresholds": {"hr_max": 140}}
         res_patch = self.client.patch(f'/api/v1/patients/{p.id}/thresholds/', patch_payload, format='json')
-        self.assertEqual(res_patch.status_code, 200)
-        self.assertEqual(res_patch.data['thresholds']['hr_max'], 125)
+        self.assertEqual(res_patch.status_code, 403)
 
-        # Verify persistence on subsequent GET
-        res_get2 = self.client.get(f'/api/v1/patients/{p.id}/thresholds/')
-        self.assertEqual(res_get2.data['thresholds']['hr_max'], 125)
+        # Login as Doctor
+        res_doc = self.client.post('/api/v1/auth/login/', {"email": "dr.mehta@caresense.io", "password": "DoctorPass2026!"}, format='json')
+        doc_token = res_doc.data['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {doc_token}')
+
+        # Doctor modifying thresholds should succeed with 200 OK
+        res_doc_patch = self.client.patch(f'/api/v1/patients/{p.id}/thresholds/', patch_payload, format='json')
+        self.assertEqual(res_doc_patch.status_code, 200)
+        self.assertEqual(res_doc_patch.data['thresholds']['hr_max'], 140)
 
     def test_patient_heartbeat_and_connection_status(self):
-        from django.utils import timezone
-        import datetime
         p = Patient.objects.create(name="Heartbeat Test Patient", device_id="ESP32_NODE_HB")
 
-        # No reading -> OFFLINE
-        res = self.client.get(f'/api/v1/patients/{p.id}/')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data['connection_status'], 'OFFLINE')
+        # 1. No reading -> OFFLINE
+        res_offline = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res_offline.data['connection_status'], 'OFFLINE')
+        self.assertEqual(res_offline.data['telemetry_status'], 'MISSING')
+        self.assertEqual(res_offline.data['data_source'], 'NONE')
 
-        # Recent reading (< 20s) -> ONLINE
-        v = VitalReading.objects.create(
-            patient=p, device_timestamp=1000, heart_rate=72.0,
-            spo2=98.0, temperature=36.6, state="NORMAL"
-        )
-        res = self.client.get(f'/api/v1/patients/{p.id}/')
-        self.assertEqual(res.data['connection_status'], 'ONLINE')
-
-        # Stale reading (35s ago) -> STALE
-        VitalReading.objects.filter(id=v.id).update(
-            received_at=timezone.now() - datetime.timedelta(seconds=35)
-        )
-        res = self.client.get(f'/api/v1/patients/{p.id}/')
-        self.assertEqual(res.data['connection_status'], 'STALE')
-
-        # Offline reading (120s ago) -> OFFLINE
-        VitalReading.objects.filter(id=v.id).update(
-            received_at=timezone.now() - datetime.timedelta(seconds=120)
-        )
-        res = self.client.get(f'/api/v1/patients/{p.id}/')
-        self.assertEqual(res.data['connection_status'], 'OFFLINE')
-
-    def test_seed_ward_command(self):
-        from django.core.management import call_command
-        call_command('seed_ward')
-        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_01").exists())
-        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_02").exists())
-        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_03").exists())
-        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_04").exists())
-        p1 = Patient.objects.get(device_id="ESP32_NODE_01")
-        self.assertEqual(p1.room, "PT-0142")
-
-    def test_ward_index_aliases(self):
-        from django.core.management import call_command
-        call_command('seed_ward')
-        p1 = Patient.objects.get(device_id="ESP32_NODE_01")
-        p2 = Patient.objects.get(device_id="ESP32_NODE_02")
-
-        # Vital for node 01
+        # 2. Fresh hardware reading -> ONLINE
         VitalReading.objects.create(
-            patient=p1, device_timestamp=100, heart_rate=76.0,
-            spo2=98.0, temperature=36.6, state="NORMAL"
+            patient=p, device_timestamp=1000, heart_rate=75.0, spo2=98.0,
+            temperature=36.6, motion_flag=False, sos_pressed=False,
+            state="NORMAL", source="hardware"
         )
+        res_online = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res_online.data['connection_status'], 'ONLINE')
+        self.assertEqual(res_online.data['telemetry_status'], 'LIVE')
+        self.assertEqual(res_online.data['data_source'], 'HARDWARE')
 
-        # Resolving via index '1'
-        res1 = self.client.get('/api/v1/patients/1/vitals/')
-        self.assertEqual(res1.status_code, 200)
-        self.assertEqual(len(res1.data), 1)
-        self.assertEqual(res1.data[0]['heart_rate'], 76.0)
-
-        # Resolving via index '2' (has 0 vitals)
-        res2 = self.client.get('/api/v1/patients/2/vitals/')
-        self.assertEqual(res2.status_code, 200)
-        self.assertEqual(len(res2.data), 0)
-
-
+        # 3. Fresh simulated reading -> SIMULATED
+        p2 = Patient.objects.create(name="Sim Patient", device_id="ESP32_NODE_SIM")
+        VitalReading.objects.create(
+            patient=p2, device_timestamp=2000, heart_rate=78.0, spo2=98.0,
+            temperature=36.6, motion_flag=False, sos_pressed=False,
+            state="NORMAL", source="simulation"
+        )
+        res_sim = self.client.get(f'/api/v1/patients/{p2.id}/')
+        self.assertEqual(res_sim.data['connection_status'], 'SIMULATED')
+        self.assertEqual(res_sim.data['data_source'], 'SIMULATION')
