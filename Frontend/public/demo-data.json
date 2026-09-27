@@ -1,0 +1,78 @@
+{
+  "users": [
+    {
+      "email": "dr.mehta@caresense.io",
+      "password": "DoctorPass2026!",
+      "display_name": "Dr. Ronald Mehta",
+      "username": "dr.mehta",
+      "role": "DOCTOR",
+      "permissions": { "can_update_thresholds": true }
+    },
+    {
+      "email": "nurse.sarah@caresense.io",
+      "password": "NursePass2026!",
+      "display_name": "Sarah Jenkins",
+      "username": "nurse.sarah",
+      "role": "NURSE",
+      "permissions": { "can_update_thresholds": false }
+    },
+    {
+      "email": "admin@caresense.io",
+      "password": "AdminPass2026!",
+      "display_name": "System Administrator",
+      "username": "admin",
+      "role": "ADMIN",
+      "permissions": { "can_update_thresholds": true }
+    }
+  ],
+  "patients": [
+    {
+      "id": 1,
+      "name": "Rahul Sharma",
+      "device_id": "ESP32_NODE_01",
+      "room": "PT-0142",
+      "data_source": "SIMULATION",
+      "thresholds": { "hr_min": 50, "hr_max": 120, "spo2_min": 92, "temp_max": 38.5 }
+    },
+    {
+      "id": 2,
+      "name": "Anita Rao",
+      "device_id": "ESP32_NODE_02",
+      "room": "PT-0143",
+      "data_source": "SIMULATION",
+      "thresholds": { "hr_min": 55, "hr_max": 115, "spo2_min": 93, "temp_max": 38.0 }
+    },
+    {
+      "id": 3,
+      "name": "S. Iyer",
+      "device_id": "ESP32_NODE_03",
+      "room": "PT-0144",
+      "data_source": "SIMULATION",
+      "thresholds": { "hr_min": 50, "hr_max": 110, "spo2_min": 90, "temp_max": 38.2 }
+    },
+    {
+      "id": 4,
+      "name": "Fatima K.",
+      "device_id": "ESP32_NODE_04",
+      "room": "PT-0145",
+      "data_source": "SIMULATION",
+      "thresholds": { "hr_min": 60, "hr_max": 125, "spo2_min": 94, "temp_max": 38.5 }
+    }
+  ],
+  "vitals": [
+    { "id": 101, "patient_id": 1, "device_id": "ESP32_NODE_01", "heart_rate": 78, "spo2": 98.4, "temperature": 36.8, "motion_flag": false, "sos_pressed": false, "state": "NORMAL", "source": "simulation", "received_at": "2026-09-28T10:08:00Z" },
+    { "id": 102, "patient_id": 1, "device_id": "ESP32_NODE_01", "heart_rate": 126, "spo2": 96.2, "temperature": 37.2, "motion_flag": false, "sos_pressed": false, "state": "WATCH", "source": "simulation", "received_at": "2026-09-28T10:07:00Z" },
+    { "id": 103, "patient_id": 2, "device_id": "ESP32_NODE_02", "heart_rate": 72, "spo2": 97.8, "temperature": 36.6, "motion_flag": false, "sos_pressed": false, "state": "NORMAL", "source": "simulation", "received_at": "2026-09-28T10:08:00Z" },
+    { "id": 104, "patient_id": 2, "device_id": "ESP32_NODE_02", "heart_rate": 142, "spo2": 91.0, "temperature": 38.9, "motion_flag": false, "sos_pressed": false, "state": "CRITICAL", "source": "simulation", "received_at": "2026-09-28T10:06:00Z" },
+    { "id": 105, "patient_id": 3, "device_id": "ESP32_NODE_03", "heart_rate": 48, "spo2": 95.6, "temperature": 36.5, "motion_flag": false, "sos_pressed": false, "state": "WATCH", "source": "simulation", "received_at": "2026-09-28T10:08:00Z" },
+    { "id": 106, "patient_id": 3, "device_id": "ESP32_NODE_03", "heart_rate": 76, "spo2": 98.1, "temperature": 36.7, "motion_flag": false, "sos_pressed": false, "state": "NORMAL", "source": "simulation", "received_at": "2026-09-28T10:07:00Z" },
+    { "id": 107, "patient_id": 4, "device_id": "ESP32_NODE_04", "heart_rate": 84, "spo2": 94.2, "temperature": 38.7, "motion_flag": false, "sos_pressed": false, "state": "WATCH", "source": "simulation", "received_at": "2026-09-28T10:08:00Z" },
+    { "id": 108, "patient_id": 4, "device_id": "ESP32_NODE_04", "heart_rate": 82, "spo2": 94.8, "temperature": 36.9, "motion_flag": true, "sos_pressed": false, "state": "CRITICAL", "source": "simulation", "received_at": "2026-09-28T10:05:00Z" }
+  ],
+  "alerts": [
+    { "id": 201, "patient_id": 2, "patient_name": "Anita Rao", "room": "PT-0143", "level": "CRITICAL", "status": "NEW", "alert_type": "HYPOXIA", "message": "Oxygen is below the safe limit", "value": "91.0%", "threshold": "< 93%", "source": "simulation", "channels_sent": "Ward screen, Email", "acknowledged": false, "created_at": "2026-09-28T10:06:00Z" },
+    { "id": 202, "patient_id": 3, "patient_name": "S. Iyer", "room": "PT-0144", "level": "WATCH", "status": "ACKNOWLEDGED", "alert_type": "BRADYCARDIA", "message": "Heart rate is below the watch limit", "value": "48 BPM", "threshold": "< 50 BPM", "source": "simulation", "channels_sent": "Ward screen", "acknowledged": true, "acknowledged_by": "Sarah Jenkins (NURSE)", "created_at": "2026-09-28T10:04:00Z" },
+    { "id": 203, "patient_id": 4, "patient_name": "Fatima K.", "room": "PT-0145", "level": "CRITICAL", "status": "RESOLVED", "alert_type": "FALL_DETECTED", "message": "Sudden movement suggests a fall", "value": "Impact detected", "threshold": "Impact > 2.0g", "source": "simulation", "channels_sent": "Ward screen, Email", "acknowledged": true, "resolved_by": "Dr. Ronald Mehta (DOCTOR)", "created_at": "2026-09-28T10:01:00Z" },
+    { "id": 204, "patient_id": 1, "patient_name": "Rahul Sharma", "room": "PT-0142", "level": "WATCH", "status": "NEW", "alert_type": "TACHYCARDIA", "message": "Heart rate is above the watch limit", "value": "126 BPM", "threshold": "> 120 BPM", "source": "simulation", "channels_sent": "Ward screen", "acknowledged": false, "created_at": "2026-09-28T10:07:00Z" }
+  ]
+}
