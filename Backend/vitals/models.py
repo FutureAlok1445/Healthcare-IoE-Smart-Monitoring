@@ -12,6 +12,11 @@ class VitalReading(models.Model):
     motion_flag = models.BooleanField(default=False)   # fall detected (MPU6050)
     sos_pressed = models.BooleanField(default=False)   # SOS button latched
     state = models.CharField(max_length=10)            # NORMAL / WATCH / CRITICAL
+    source = models.CharField(
+        max_length=20,
+        default='hardware',
+        choices=[('hardware', 'Hardware'), ('simulation', 'Simulation')]
+    )
     received_at = models.DateTimeField(auto_now_add=True)  # real server-side timestamp
 
     class Meta:

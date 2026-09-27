@@ -13,12 +13,14 @@ class VitalIngestSerializer(serializers.Serializer):
     sos_pressed = serializers.BooleanField()
     state = serializers.ChoiceField(choices=['NORMAL', 'WATCH', 'CRITICAL'])
     timestamp = serializers.IntegerField(min_value=0, max_value=4294967295)
+    source = serializers.CharField(max_length=20, required=False, default='hardware')
 
     def create(self, validated_data):
         patient, _ = Patient.objects.get_or_create(
             device_id=validated_data['device_id'],
             defaults={'name': f"Patient ({validated_data['device_id']})"},
         )
+        source = validated_data.get('source') or 'hardware'
         return VitalReading.objects.create(
             patient=patient,
             device_timestamp=validated_data['timestamp'],
@@ -28,6 +30,7 @@ class VitalIngestSerializer(serializers.Serializer):
             motion_flag=validated_data['motion_flag'],
             sos_pressed=validated_data['sos_pressed'],
             state=validated_data['state'],
+            source=source,
         )
 
 
@@ -40,5 +43,6 @@ class VitalReadingSerializer(serializers.ModelSerializer):
         model = VitalReading
         fields = [
             'id', 'patient_id', 'device_id', 'device_timestamp', 'heart_rate',
-            'spo2', 'temperature', 'motion_flag', 'sos_pressed', 'state', 'received_at',
+            'spo2', 'temperature', 'motion_flag', 'sos_pressed', 'state',
+            'source', 'received_at',
         ]
