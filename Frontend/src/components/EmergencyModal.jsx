@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { IconX, IconAlertTriangle } from './Icons';
 
 export default function EmergencyModal({ alert: emergencyAlert, patient, onClose, onAcknowledge }) {
   const [callInitiated, setCallInitiated] = useState(false);
@@ -7,19 +8,20 @@ export default function EmergencyModal({ alert: emergencyAlert, patient, onClose
 
   const handleCallPatient = () => {
     setCallInitiated(true);
-    setTimeout(() => {
-      window.alert(`[EMERGENCY DISPATCH] Connecting cellular call to ${patient?.name || 'Rahul Sharma'} (${patient?.room || 'Room PT-0142'})...\nCaregiver Hotline: +91 98765 43210`);
-    }, 100);
   };
 
   return (
     <div className="emergency-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="emergency-title" onClick={onClose}>
       <div className="emergency-modal-card" onClick={(e) => e.stopPropagation()}>
         {/* Close 'X' Button */}
-        <button type="button" className="btn-modal-close" onClick={onClose} aria-label="Close Modal">✕</button>
+        <button type="button" className="btn-modal-close" onClick={onClose} aria-label="Close Modal">
+          <IconX size={18} />
+        </button>
 
         {/* Red Exclamation Icon */}
-        <div className="emergency-icon-circle" aria-hidden="true">!</div>
+        <div className="emergency-icon-circle" aria-hidden="true">
+          <IconAlertTriangle size={30} color="#ffffff" />
+        </div>
 
         <h2 id="emergency-title" className="emergency-title">EMERGENCY ALERT</h2>
         <p className="emergency-subtitle">Abnormal vitals detected — immediate attention required</p>
@@ -73,6 +75,12 @@ export default function EmergencyModal({ alert: emergencyAlert, patient, onClose
             VIEW LIVE VITALS
           </button>
         </div>
+
+        {callInitiated && (
+          <div className="call-active-banner">
+            <span>Cellular audio link established with Room {patient?.room || 'PT-0142'} intercom. Hotline +91 98765 43210</span>
+          </div>
+        )}
 
         {/* Notification channels dispatch line */}
         <p className="emergency-channels-note">

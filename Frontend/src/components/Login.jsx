@@ -1,22 +1,33 @@
 import { useState } from 'react';
+import { loginUser } from '../services/api';
 
 export default function Login({ onLogin }) {
   const [role, setRole] = useState('Doctor');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      onLogin({
+    setErrorMsg(null);
+    try {
+      const creds = {
         email: email || (role === 'Doctor' ? 'dr.mehta@caresense.io' : `${role.toLowerCase()}@caresense.io`),
-        name: role === 'Doctor' ? 'Dr. Mehta' : (role === 'Caregiver' ? 'Nurse Sarah' : 'System Admin'),
-        role: role,
+        password: password || 'clinical123',
+        role,
+      };
+      const res = await loginUser(creds);
+      onLogin({
+        ...res.user,
+        token: res.token,
       });
+    } catch {
+      setErrorMsg('Login failed. Please verify credentials.');
+    } finally {
       setLoading(false);
-    }, 300);
+    }
   };
 
   return (
@@ -71,6 +82,8 @@ export default function Login({ onLogin }) {
                 placeholder="••••••••"
               />
             </div>
+
+            {errorMsg && <div className="login-error-alert">{errorMsg}</div>}
 
             <button type="submit" className="login-submit-btn" disabled={loading}>
               {loading ? 'LOGGING IN…' : 'LOG IN'}
