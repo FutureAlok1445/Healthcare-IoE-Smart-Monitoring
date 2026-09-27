@@ -3,6 +3,7 @@
 Live dashboard ("CareSense IoE") that polls the Django backend every 5 seconds
 (matching the ESP32's SENSOR_INTERVAL_MS) and shows current vitals, an alert
 log, a heart-rate trend chart, and recent reading history.
+It also includes a no-hardware demo mode for local evaluation.
 
 ## Setup
 
@@ -11,8 +12,9 @@ npm install
 npm run dev
 ```
 
-Opens at http://localhost:5173 — make sure the Django backend is running
-first (http://localhost:8000) or the dashboard will show a connection error.
+Opens at http://localhost:5173. The dashboard uses Django when available;
+otherwise it loads `public/demo-data.json` and works with the demo accounts in
+the root README.
 
 ## Configuration
 
@@ -22,11 +24,8 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 VITE_PATIENT_ID=1
 ```
 
-This mini-project prototype assumes a single wearable node / single patient
-(see report Chapter 1.4 Scope). VITE_PATIENT_ID=1 works because Django
-auto-creates the first patient as id 1 the moment the ESP32's first reading
-arrives. You can also set VITE_PATIENT_ID to the device_id string directly
-(e.g. "ESP32_NODE_01") since the backend accepts both.
+The dashboard supports multiple ward patients. `VITE_PATIENT_ID` can select a
+patient by database ID or device ID, such as `ESP32_NODE_01`.
 
 ## What each part does
 

@@ -23,5 +23,5 @@ static const unsigned long SENSOR_INTERVAL_MS = 5000;
 // connect (this is expected and safe in the tinkered.ai simulator).
 static const char* WIFI_SSID = "YOUR_WIFI_SSID";
 static const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-static const char* BACKEND_URL = "http://example.com/health"; // e.g. http://192.168.1.X:8000/api/v1/vitals/
+static const char* BACKEND_URL = "http://192.168.1.X:8000/api/v1/vitals/";
 static const char* DEVICE_ID = "ESP32_NODE_01";

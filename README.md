@@ -47,6 +47,26 @@ An end-to-end, medical IoT / IoE (Internet of Everything) continuous patient mon
 ---
 
 ## 🔌 Hardware Pinout & Wiring
+## No-Hardware Demo Mode
+
+You can run the complete dashboard without an ESP32, sensors, Wi-Fi, or Django. The frontend tries the Django API first. If it is unavailable, it loads the optional `Frontend/public/demo-data.json` file and provides local demo login, vitals, alerts, thresholds, simulator events, and reports. If that file is deleted, a small built-in fallback keeps the app running without a broken import.
+
+Demo accounts:
+
+| Role | Email | Password |
+|---|---|---|
+| Doctor | `dr.mehta@caresense.io` | `DoctorPass2026!` |
+| Caregiver | `nurse.sarah@caresense.io` | `NursePass2026!` |
+| Admin | `admin@caresense.io` | `AdminPass2026!` |
+
+```powershell
+cd Frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/`, expand the demo credentials panel, and sign in. Use Settings to try normal, fast-heart-rate, low-oxygen, fever, fall, and SOS events. The dashboard marks these readings as Demonstration Mode.
+
 
 | Component | ESP32 GPIO | Description |
 |---|---|---|
@@ -151,7 +171,7 @@ Healthcare-IoE/
 
 ## 🚀 Quick Start Guide
 
-### 1. Setting Up the Backend
+### 1. Setting Up the Backend (when using Django or hardware)
 
 ```powershell
 # Navigate to the backend folder

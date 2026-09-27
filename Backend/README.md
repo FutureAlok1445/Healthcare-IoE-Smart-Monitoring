@@ -1,6 +1,12 @@
 # Healthcare IoE — Backend (Django + DRF)
 
 Receives sensor data from the ESP32 firmware, stores it, and auto-raises alerts.
+The backend is optional for the no-hardware demo. Start it when you need
+database persistence, API testing, or real ESP32 telemetry.
+
+Clinical patient and alert endpoints require a DRF token from the login API.
+The telemetry ingestion endpoint remains open so an ESP32 can post readings
+without a browser session.
 
 ## Setup
 
@@ -30,10 +36,11 @@ Server runs at http://127.0.0.1:8000
 
 ## Alert Latching, Escalation & Anti-Flooding
 
-When an ESP32 sends a `WATCH` or `CRITICAL` reading:
-- If no active (unacknowledged) alert exists for that patient, a new alert is generated.
+When an ESP32 sends a `WATCH` or `CRITICAL` reading, the server recalculates
+the clinical state from the measured values and the patient's thresholds:
+- If no active (`NEW` or `ACKNOWLEDGED`) alert exists for that incident type, a new alert is generated.
 - **Alert Escalation (WATCH → CRITICAL):** If a patient already has an active `WATCH` alert and condition worsens to `CRITICAL`, the active alert is automatically escalated to `CRITICAL` in-place (updating severity, message, and readings) without creating duplicate unacknowledged records.
-- **Anti-Flooding:** If an active alert of the same severity already exists, it is updated in-place with the latest vital values rather than spamming duplicate rows in the database every 5 seconds.
+- **Anti-Flooding:** If an active alert of the same incident type already exists, it is updated in-place with the latest vital values rather than spamming duplicate rows in the database every 5 seconds.
 - Once acknowledged by medical staff, subsequent breaches will trigger a fresh alert.
 
 ## JSON payload expected by /api/v1/vitals/
