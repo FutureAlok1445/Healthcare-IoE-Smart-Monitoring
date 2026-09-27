@@ -46,7 +46,6 @@ An end-to-end, medical IoT / IoE (Internet of Everything) continuous patient mon
 
 ---
 
-## 🔌 Hardware Pinout & Wiring
 ## No-Hardware Demo Mode
 
 You can run the complete dashboard without an ESP32, sensors, Wi-Fi, or Django. The frontend tries the Django API first. If it is unavailable, it loads the optional `Frontend/public/demo-data.json` file and provides local demo login, vitals, alerts, thresholds, simulator events, and reports. If that file is deleted, a small built-in fallback keeps the app running without a broken import.
@@ -67,6 +66,9 @@ npm run dev
 
 Open `http://localhost:5173/`, expand the demo credentials panel, and sign in. Use Settings to try normal, fast-heart-rate, low-oxygen, fever, fall, and SOS events. The dashboard marks these readings as Demonstration Mode.
 
+---
+
+## 🔌 Hardware Pinout & Wiring
 
 | Component | ESP32 GPIO | Description |
 |---|---|---|
@@ -171,6 +173,17 @@ Healthcare-IoE/
 
 ## 🚀 Quick Start Guide
 
+### Prerequisites
+
+- Python 3.10 or newer
+- Node.js 18 or newer and npm
+- VS Code is recommended; PlatformIO is only needed when flashing the ESP32
+
+The project has two ways to run:
+
+1. **Demo mode:** Run only the frontend. No Django, database, Wi-Fi, or ESP32 is required.
+2. **Connected mode:** Run Django and the frontend together. Use this for database persistence, API testing, or ESP32 telemetry.
+
 ### 1. Setting Up the Backend (when using Django or hardware)
 
 ```powershell
@@ -190,10 +203,19 @@ pip install -r requirements.txt
 # Run database migrations
 python manage.py migrate
 
+# Add the sample ward patients and demo clinical accounts
+python manage.py seed_ward
+
 # Start the local development server
 python manage.py runserver
 ```
 The server will start at: `http://127.0.0.1:8000/api/v1/`
+
+For ESP32 access over the laptop's Wi-Fi network, use:
+
+```powershell
+python manage.py runserver 0.0.0.0:8000
+```
 
 ### 2. Setting Up the Frontend Dashboard
 
@@ -209,6 +231,13 @@ npm run dev
 ```
 The dashboard will open at: `http://localhost:5173/`
 
+The frontend reads `Frontend/.env` when present. Use `Frontend/.env.example` as the template:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_PATIENT_ID=1
+```
+
 ### 3. Running Automated Tests
 
 To verify backend routing, serializer validations, alert anti-flooding, and patient APIs:
@@ -217,13 +246,23 @@ cd Backend
 python manage.py test
 ```
 
-### 4. Flashing the Firmware
+### 4. Running the Connected Project
 
-1. Open [`src/config.h`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/src/config.h) or [`HealthMonitor/config.h`](file:///c:/Users/Alok/Desktop/MY_PROEJCT/Healthcare-IoE/HealthMonitor/config.h).
-2. Update `WIFI_SSID`, `WIFI_PASSWORD`, and `BACKEND_URL` (e.g., `http://<YOUR_LOCAL_IP>:8000/api/v1/vitals/`).
-3. Compile and flash using either:
+Start Django and Vite in two terminals. Sign in through the dashboard using one
+of the seeded accounts listed above. The frontend sends the saved DRF token on
+clinical API requests. The ESP32 sends telemetry to `POST /api/v1/vitals/`, and
+the backend stores readings and creates or updates alerts.
+
+### 5. Flashing the Firmware Later
+
+1. Connect the ESP32 to the laptop with a data-capable USB cable.
+2. Open [`src/config.h`](src/config.h) or [`HealthMonitor/config.h`](HealthMonitor/config.h).
+3. Set `WIFI_SSID`, `WIFI_PASSWORD`, and `BACKEND_URL`, using the laptop Wi-Fi address (for example, `http://192.168.1.25:8000/api/v1/vitals/`).
+4. Keep the laptop and ESP32 on the same Wi-Fi network. USB is used for flashing and serial logs; telemetry uses Wi-Fi.
+5. Compile and flash using either:
    * **PlatformIO:** Open workspace in VS Code with PlatformIO, click **Build** -> **Upload**.
    * **Arduino IDE:** Open `HealthMonitor/HealthMonitor.ino`, select board `ESP32 Dev Module`, and click **Upload**.
+6. Open Serial Monitor at `115200` and confirm Wi-Fi connection and HTTP `201` responses.
 
 ---
 
