@@ -268,4 +268,73 @@ class VitalIngestTests(TestCase):
         self.assertEqual(res_patch.status_code, 200)
         self.assertEqual(res_patch.data['thresholds']['hr_max'], 125)
 
+        # Verify persistence on subsequent GET
+        res_get2 = self.client.get(f'/api/v1/patients/{p.id}/thresholds/')
+        self.assertEqual(res_get2.data['thresholds']['hr_max'], 125)
+
+    def test_patient_heartbeat_and_connection_status(self):
+        from django.utils import timezone
+        import datetime
+        p = Patient.objects.create(name="Heartbeat Test Patient", device_id="ESP32_NODE_HB")
+
+        # No reading -> OFFLINE
+        res = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['connection_status'], 'OFFLINE')
+
+        # Recent reading (< 20s) -> ONLINE
+        v = VitalReading.objects.create(
+            patient=p, device_timestamp=1000, heart_rate=72.0,
+            spo2=98.0, temperature=36.6, state="NORMAL"
+        )
+        res = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res.data['connection_status'], 'ONLINE')
+
+        # Stale reading (35s ago) -> STALE
+        VitalReading.objects.filter(id=v.id).update(
+            received_at=timezone.now() - datetime.timedelta(seconds=35)
+        )
+        res = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res.data['connection_status'], 'STALE')
+
+        # Offline reading (120s ago) -> OFFLINE
+        VitalReading.objects.filter(id=v.id).update(
+            received_at=timezone.now() - datetime.timedelta(seconds=120)
+        )
+        res = self.client.get(f'/api/v1/patients/{p.id}/')
+        self.assertEqual(res.data['connection_status'], 'OFFLINE')
+
+    def test_seed_ward_command(self):
+        from django.core.management import call_command
+        call_command('seed_ward')
+        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_01").exists())
+        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_02").exists())
+        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_03").exists())
+        self.assertTrue(Patient.objects.filter(device_id="ESP32_NODE_04").exists())
+        p1 = Patient.objects.get(device_id="ESP32_NODE_01")
+        self.assertEqual(p1.room, "PT-0142")
+
+    def test_ward_index_aliases(self):
+        from django.core.management import call_command
+        call_command('seed_ward')
+        p1 = Patient.objects.get(device_id="ESP32_NODE_01")
+        p2 = Patient.objects.get(device_id="ESP32_NODE_02")
+
+        # Vital for node 01
+        VitalReading.objects.create(
+            patient=p1, device_timestamp=100, heart_rate=76.0,
+            spo2=98.0, temperature=36.6, state="NORMAL"
+        )
+
+        # Resolving via index '1'
+        res1 = self.client.get('/api/v1/patients/1/vitals/')
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(len(res1.data), 1)
+        self.assertEqual(res1.data[0]['heart_rate'], 76.0)
+
+        # Resolving via index '2' (has 0 vitals)
+        res2 = self.client.get('/api/v1/patients/2/vitals/')
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(len(res2.data), 0)
+
 
