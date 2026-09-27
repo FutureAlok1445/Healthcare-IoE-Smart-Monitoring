@@ -78,6 +78,30 @@ Every subsystem has been thoroughly audited, verified against the circuit schema
 
 ---
 
+## 📊 Table 8.4: Project Report Implementation Matrix
+
+This table summarizes the alignment between the specifications/wireframes in Chapters 7, 8, and 9 of the project report and the actual implementation in this repository.
+
+| Report Reference | Feature / Specification Claimed | Prototype Status | Implementation Details & Verifications |
+|---|---|---|---|
+| **Fig 7.1** | Login Screen (Doctor / Caregiver / Admin role tabs, OTP footnote) | **Fully Implemented** | Split-screen layout in `Frontend/src/components/Login.jsx` with navy hero panel, clinical quote, role toggle tabs, demo credentials, and authentication against `POST /api/v1/auth/login/`. |
+| **Fig 7.2** | Left Navigation Sidebar (Dashboard, Live Vitals, Patients, Alerts, Reports, Settings) | **Fully Implemented** | Navy sidebar in `Frontend/src/components/Sidebar.jsx` with active state highlights, notification badge counts, and user profile badge (`Dr. Mehta / Doctor`). |
+| **Fig 7.2** | Multi-Patient Selector Strip (Ward Overview) | **Fully Implemented** | Horizontal patient strip in `Frontend/src/components/PatientSelector.jsx` with 4 patients (`Rahul Sharma` [PT-0142 Live], `Anita Rao`, `S. Iyer`, `Fatima K.`), status indicators, and ward switching. |
+| **Fig 7.2** | 4 Vital Sign Cards (SpO2, Heart Rate, Body Temp, Motion/Fall) | **Fully Implemented** | Real-time sensor cards in `Frontend/src/components/VitalCard.jsx` displaying live readings, normal ranges, and dynamic threshold status badges. |
+| **Fig 7.2** | Vital Trend Charts & Recent Alert Log | **Fully Implemented** | Dual-panel layout in `Frontend/src/components/HeartRateChart.jsx` and `AlertLog.jsx` with real-time SVG curve, threshold line (120 BPM), and one-click alert acknowledgment. |
+| **Fig 7.2** | Patient Reading History Table | **Fully Implemented** | Last 5 readings table in `Frontend/src/components/HistoryTable.jsx` displaying timestamp, heart rate, SpO2, temperature, and motion status. |
+| **Fig 7.3** | Full-Screen Emergency Alert Modal | **Fully Implemented** | High-contrast emergency modal in `Frontend/src/components/EmergencyModal.jsx` with abnormal readings box, `CALL PATIENT NOW`, `VIEW LIVE VITALS`, `ACKNOWLEDGE ALERT`, and delivery dispatch note. |
+| **Table 8.2** | `POST /api/v1/vitals/` (Telemetry ingestion) | **Fully Implemented** | Ingests ESP32 telemetry with anti-flooding, in-place alert updates, full 32-bit unsigned `timestamp` range, and auto-provisioning. |
+| **Table 8.2** | `GET /api/v1/patients/` & `GET /api/v1/patients/<id>/` | **Fully Implemented** | Patient listing and retrieval with dual-identifier lookup (ID or `device_id`) and safe prototype fallback. |
+| **Table 8.2** | `POST /api/v1/auth/login/` (Role-based authentication) | **Fully Implemented** | `AuthLoginView` validates Doctor/Caregiver/Admin credentials and returns authenticated user object with role and session token. |
+| **Table 8.2** | `GET/PATCH /api/v1/patients/<id>/thresholds/` | **Fully Implemented** | Dedicated endpoint `PatientThresholdsView` for viewing and tailoring patient vital thresholds (`hr_min`, `hr_max`, `spo2_min`, `temp_max`). |
+| **Table 8.2** | `PATCH /api/v1/alerts/<id>/acknowledge/` | **Fully Implemented** | One-click clinical alert acknowledgment updating database state and UI status badge. |
+| **Table 8.3** | `Alert.channels_sent` field | **Fully Implemented** | Tracks notification dispatch channels (`SMS, Email and Push Notification`) on alert model and serializer. |
+| **Chapter 4** | Physical Sensor Pipeline & Hardware Bus | **Fully Implemented** | DS18B20 (GPIO4, non-blocking), MAX30102 (I2C GPIO21/22), MPU-6050 (I2C GPIO21/22), SOS (GPIO27), Buzzer (GPIO18), 3-color LEDs (GPIO25, 26, 32). |
+| **Chapter 9** | Fall Detection & Multi-sensor Fusion Thresholds | **Hardware Prototype Validated** | Vector magnitude threshold calculation (`|a| > 2.5g`) and vital breach detection driving firmware alert states (`NORMAL`, `WATCH`, `CRITICAL`). |
+
+---
+
 ## 📁 Repository Structure
 
 ```text
@@ -177,10 +201,13 @@ python manage.py test
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `POST` | `/api/v1/auth/login/` | Role-based authentication (Doctor / Caregiver / Admin) returning user profile and session token |
 | `POST` | `/api/v1/vitals/` | Telemetry ingestion endpoint for the ESP32 |
 | `GET` | `/api/v1/patients/` | List all registered patients with latest vitals & alert summary |
 | `GET` | `/api/v1/patients/<id_or_device>/` | Retrieve patient profile by numeric ID or device string |
 | `PATCH` | `/api/v1/patients/<id_or_device>/` | Update patient profile details |
+| `GET` | `/api/v1/patients/<id_or_device>/thresholds/` | Retrieve clinical vitals thresholds (`hr_min`, `hr_max`, `spo2_min`, `temp_max`) |
+| `PATCH` | `/api/v1/patients/<id_or_device>/thresholds/` | Tailor clinical alert thresholds for a specific patient |
 | `GET` | `/api/v1/patients/<id_or_device>/vitals/` | Recent vital history (up to 100 entries) |
 | `GET` | `/api/v1/patients/<id_or_device>/alerts/` | Alert history for a specific patient |
 | `GET` | `/api/v1/alerts/` | Global alerts feed (filter with `?acknowledged=false`) |
