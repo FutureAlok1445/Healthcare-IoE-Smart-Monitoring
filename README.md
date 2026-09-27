@@ -18,9 +18,19 @@ An end-to-end, medical IoT / IoE (Internet of Everything) continuous patient mon
 * **Production-Grade Django Backend:**
   * Auto-provisioning of patient profiles upon first device connection.
   * Smart Alert Latching & Anti-Flooding: Updates active alerts in-place rather than generating duplicate database rows every 5 seconds.
-  * Dual-identifier URL resolution (accepts numeric primary key or hardware `device_id`).
-  * Full 32-bit unsigned `millis()` timestamp ingestion support.
+  * Dual-identifier URL resolution (`resolve_patient` accepts numeric primary key, hardware `device_id`, ward index '1'-'4', or semantic aliases).
+  * Real-time **Hardware Heartbeat**: calculates live node status (`ONLINE`, `STALE`, `OFFLINE`) based on telemetry packet latency.
+  * Cybersecurity Hardening: environment variable secret management, CORS/CSRF origin restriction, REST Framework throttling (180 req/min), and HTTP security headers (`nosniff`, `DENY` clickjacking, XSS filter).
+  * Automated Ward Seeding (`python manage.py seed_ward`) maintaining official ward patients.
   * Central alert monitoring feed with acknowledgment endpoints.
+* **Modern Clinical Dashboard & Multi-Tab Suite:**
+  * **Clinical Overview:** Real-time vital cards, Recharts heart rate trend line, alert log, and reading history.
+  * **Live Vitals & Sensor Telemetry:** Real-time PPG plethysmogram waveform, MPU-6050 tri-axis accelerometer & gyroscope bars, DS18B20 digital thermometer, and raw JSON REST packet inspector.
+  * **Ward Patient Directory:** Complete bed assignment registry with threshold profiles and monitoring shortcuts.
+  * **Alerts Audit Trail:** Chronological clinical incident audit log with severity filtering and one-click acknowledgment.
+  * **Shift Reports:** Physician handoff summary with KPI metrics (Mean HR, SpO2 floor, Peak Temp) and one-click CSV export.
+  * **Settings & Simulator:** Custom clinical threshold tailoring (`PATCH /api/v1/patients/{id}/thresholds/`) and integrated hardware telemetry simulator (Normal, Tachycardia, Hypoxia, Fever, Fall, SOS).
+  * **Zero-Emoji Compliance:** Engineered with dedicated SVG icons and modern technical skeuomorphism.
 
 ---
 
