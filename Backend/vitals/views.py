@@ -81,30 +81,9 @@ class PatientVitalsListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        from patients.models import Patient
-        identifier = str(self.kwargs.get('patient_id', '')).strip()
-
-        # Step 1: Check if the targeted patient genuinely exists in the system
-        target_patient = None
-        if identifier.isdigit():
-            target_patient = Patient.objects.filter(id=int(identifier)).first()
-        if not target_patient and identifier:
-            target_patient = Patient.objects.filter(device_id=identifier).first()
-
-        # If the patient exists, return strictly their own readings (empty queryset if 0 readings)
-        # NEVER leak another patient's data!
+        from patients.utils import resolve_patient
+        identifier = self.kwargs.get('patient_id', '')
+        target_patient = resolve_patient(identifier)
         if target_patient:
             return VitalReading.objects.filter(patient=target_patient)[:100]
-
-        # Step 2: Semantic aliases explicitly requesting active patient
-        if identifier in ('latest', 'default', 'current') or not identifier:
-            active_patient = Patient.objects.order_by('-id').first()
-            if active_patient:
-                return VitalReading.objects.filter(patient=active_patient)[:100]
-
-        # Step 3: Single-node prototype fallback: only if EXACTLY ONE patient exists in the entire system
-        if identifier == '1' and Patient.objects.count() == 1:
-            single_patient = Patient.objects.first()
-            return VitalReading.objects.filter(patient=single_patient)[:100]
-
         return VitalReading.objects.none()

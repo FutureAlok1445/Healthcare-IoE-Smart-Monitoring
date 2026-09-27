@@ -1,6 +1,8 @@
+from .utils import resolve_patient
 from rest_framework import generics, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.exceptions import NotFound
 from .models import Patient
 from .serializers import PatientSerializer
 
@@ -10,7 +12,7 @@ class PatientListCreateView(generics.ListCreateAPIView):
     GET /api/v1/patients/  — List all registered patients
     POST /api/v1/patients/ — Register a new patient
     """
-    queryset = Patient.objects.all().order_by('-created_at')
+    queryset = Patient.objects.all().order_by('id')
     serializer_class = PatientSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -24,21 +26,11 @@ class PatientDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_object(self):
-        lookup = str(self.kwargs.get('pk', '')).strip()
-        if lookup.isdigit():
-            p = Patient.objects.filter(pk=int(lookup)).first()
-            if p:
-                return p
-        p = Patient.objects.filter(device_id=lookup).first()
-        if p:
-            return p
-        if lookup in ('latest', 'default', 'current') or not lookup:
-            p = Patient.objects.order_by('-id').first()
-            if p:
-                return p
-        if lookup == '1' and Patient.objects.count() == 1:
-            return Patient.objects.first()
-        return generics.get_object_or_404(Patient, pk=lookup if lookup.isdigit() else 0)
+        lookup = self.kwargs.get('pk', '')
+        patient = resolve_patient(lookup)
+        if not patient:
+            raise NotFound(detail=f"Patient '{lookup}' not found.")
+        return patient
 
 
 class PatientThresholdsView(APIView):
@@ -48,49 +40,44 @@ class PatientThresholdsView(APIView):
     """
     permission_classes = [permissions.AllowAny]
 
-    def get_patient(self, identifier):
-        identifier = str(identifier).strip()
-        if identifier.isdigit():
-            p = Patient.objects.filter(pk=int(identifier)).first()
-            if p:
-                return p
-        p = Patient.objects.filter(device_id=identifier).first()
-        if p:
-            return p
-        if identifier in ('latest', 'default', 'current') or not identifier:
-            p = Patient.objects.order_by('-id').first()
-            if p:
-                return p
-        if identifier == '1' and Patient.objects.count() == 1:
-            return Patient.objects.first()
-        return None
-
     def get(self, request, pk):
-        patient = self.get_patient(pk)
+        patient = resolve_patient(pk)
         if not patient:
-            return Response({'error': 'Patient not found'}, status=404)
+            return Response({'error': f"Patient '{pk}' not found."}, status=404)
         defaults = {
             'hr_min': 50,
             'hr_max': 120,
             'spo2_min': 92,
             'temp_max': 38.5,
         }
+        active_thresholds = {**defaults, **(patient.thresholds or {})}
         return Response({
             'patient_id': patient.id,
+            'name': patient.name,
             'device_id': patient.device_id,
-            'thresholds': defaults
+            'room': patient.room,
+            'thresholds': active_thresholds
         })
 
     def patch(self, request, pk):
-        patient = self.get_patient(pk)
+        patient = resolve_patient(pk)
         if not patient:
-            return Response({'error': 'Patient not found'}, status=404)
+            return Response({'error': f"Patient '{pk}' not found."}, status=404)
         thresholds = request.data.get('thresholds', request.data)
+        if not isinstance(thresholds, dict):
+            return Response({'error': 'Thresholds must be a valid JSON dictionary.'}, status=400)
+
+        # Merge with existing thresholds and persist
+        current = patient.thresholds or {}
+        current.update(thresholds)
+        patient.thresholds = current
+        patient.save(update_fields=['thresholds'])
+
         return Response({
             'status': 'updated',
             'patient_id': patient.id,
             'device_id': patient.device_id,
-            'thresholds': thresholds
+            'thresholds': patient.thresholds
         })
 
 
