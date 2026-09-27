@@ -1,0 +1,13 @@
+{
+  "id": "5538b5e9-5570-4680-a641-e93fbb81ba94",
+  "name": "ESP32 3D Circuit Debugger",
+  "path": "ESP32 3D Circuit Debugger",
+  "board": "esp32",
+  "boardId": "esp32-devkit-v1",
+  "boardFqbn": "esp32:esp32:esp32",
+  "createdAt": 1789926396563,
+  "updatedAt": 1789927545304,
+  "schemaVersion": 1,
+  "exportedAt": "2026-09-20T18:08:58.747Z",
+  "exportedBy": "tinkered-app/1.0"
+}

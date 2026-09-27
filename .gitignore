@@ -1,0 +1,34 @@
+# Python
+venv/
+Backend/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+db.sqlite3
+
+# Node / Frontend
+node_modules/
+Frontend/node_modules/
+dist/
+Frontend/dist/
+.env
+.env.local
+Frontend/.env
+
+# PlatformIO / Embedded
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Distribution archives
+Healthcare-IoE.zip
+*.zip
