@@ -52,10 +52,35 @@ class VitalIngestView(APIView):
 
         if reading.sos_pressed or reading.motion_flag:
             return 'CRITICAL'
-        if reading.heart_rate >= 140 or reading.heart_rate <= 40 or reading.spo2 <= 88 or reading.temperature >= 39.5:
+
+        hr = reading.heart_rate
+        spo2 = reading.spo2
+        temp = reading.temperature
+
+        # Critical bounds check
+        is_critical = False
+        if hr is not None and (hr >= 140 or hr <= 40):
+            is_critical = True
+        if spo2 is not None and spo2 <= 88:
+            is_critical = True
+        if temp is not None and temp >= 39.5:
+            is_critical = True
+
+        if is_critical:
             return 'CRITICAL'
-        if reading.heart_rate < hr_min or reading.heart_rate > hr_max or reading.spo2 < spo2_min or reading.temperature > temp_max:
+
+        # Watch / Warning bounds check
+        is_watch = False
+        if hr is not None and (hr < hr_min or hr > hr_max):
+            is_watch = True
+        if spo2 is not None and spo2 < spo2_min:
+            is_watch = True
+        if temp is not None and temp > temp_max:
+            is_watch = True
+
+        if is_watch:
             return 'WATCH'
+
         return 'NORMAL'
 
     def _process_clinical_alert(self, reading):
@@ -82,35 +107,37 @@ class VitalIngestView(APIView):
         elif reading.motion_flag:
             alert_type = 'FALL_DETECTED'
             level = 'CRITICAL'
-            value_str = 'Impact (>2.8g)'
-            threshold_str = 'Threshold >2.0g'
+            value_str = 'Impact (>2.5g)'
+            threshold_str = 'Threshold >2.5g'
             message = 'Sudden fall impact detected by MPU-6050 accelerometer'
-        elif reading.heart_rate > hr_max:
+        elif reading.heart_rate is not None and reading.heart_rate > hr_max:
             alert_type = 'TACHYCARDIA'
             level = 'CRITICAL' if reading.heart_rate >= 140 else 'WATCH'
             value_str = f"{reading.heart_rate:.0f} BPM"
             threshold_str = f"> {hr_max:.0f} BPM"
             message = f"Tachycardia detected: HR {reading.heart_rate:.0f} BPM exceeds maximum limit of {hr_max:.0f} BPM"
-        elif reading.heart_rate < hr_min:
+        elif reading.heart_rate is not None and reading.heart_rate < hr_min:
             alert_type = 'BRADYCARDIA'
             level = 'CRITICAL' if reading.heart_rate <= 40 else 'WATCH'
             value_str = f"{reading.heart_rate:.0f} BPM"
             threshold_str = f"< {hr_min:.0f} BPM"
             message = f"Bradycardia detected: HR {reading.heart_rate:.0f} BPM below minimum limit of {hr_min:.0f} BPM"
-        elif reading.spo2 < spo2_min:
+        elif reading.spo2 is not None and reading.spo2 < spo2_min:
             alert_type = 'HYPOXIA'
             level = 'CRITICAL' if reading.spo2 <= 88 else 'WATCH'
             value_str = f"{reading.spo2:.1f}%"
             threshold_str = f"< {spo2_min:.0f}%"
             message = f"Hypoxia desaturation: SpO2 {reading.spo2:.1f}% dropped below minimum limit of {spo2_min:.0f}%"
-        elif reading.temperature > temp_max:
+        elif reading.temperature is not None and reading.temperature > temp_max:
             alert_type = 'HIGH_TEMP'
             level = 'CRITICAL' if reading.temperature >= 39.5 else 'WATCH'
             value_str = f"{reading.temperature:.1f} °C"
             threshold_str = f"> {temp_max:.1f} °C"
             message = f"Pyrexia/High Fever: Temperature {reading.temperature:.1f} °C exceeds threshold of {temp_max:.1f} °C"
         else:
-            value_str = f"HR {reading.heart_rate:.0f}, SpO2 {reading.spo2:.0f}%"
+            hr_str = f"HR {reading.heart_rate:.0f}" if reading.heart_rate is not None else "HR N/A"
+            spo2_str = f"SpO2 {reading.spo2:.0f}%" if reading.spo2 is not None else "SpO2 N/A"
+            value_str = f"{hr_str}, {spo2_str}"
             threshold_str = 'Clinical Bounds'
             message = 'Biometric parameter breach detected'
 

@@ -6,6 +6,11 @@
 #include <HTTPClient.h>
 #include "config.h"
 
+#if USE_REAL_MAX30102
+#include <MAX30105.h>
+#include <spo2_algorithm.h>
+#endif
+
 enum AlertState {
   STATE_NORMAL = 0,
   STATE_WATCH,
@@ -48,6 +53,19 @@ struct TelemetryReading {
 OneWire oneWire(PIN_ONEWIRE);
 DallasTemperature ds18b20(&oneWire);
 
+#if USE_REAL_MAX30102
+MAX30105 particleSensor;
+static const int MAX_BUFFER_SIZE = 100;
+static uint32_t irBuffer[MAX_BUFFER_SIZE];
+static uint32_t redBuffer[MAX_BUFFER_SIZE];
+static int32_t bufferLength = MAX_BUFFER_SIZE;
+static int32_t spo2Calculated = 0;
+static int8_t spo2Valid = 0;
+static int32_t hrCalculated = 0;
+static int8_t hrValid = 0;
+static int sampleIndex = 0;
+#endif
+
 SensorData data;
 ForceFlags forced;
 
@@ -56,6 +74,7 @@ AlertState lastState = STATE_NORMAL;
 
 int consecutiveBreaches = 0;
 bool sosLatched = false;
+int lastHttpCode = 0;
 
 unsigned long lastSensorMs = 0;
 unsigned long lastBuzzerToggleMs = 0;
@@ -116,7 +135,7 @@ bool mpu6050Init() {
   Wire.write(0x00);
   if (Wire.endTransmission() != 0) return false;
 
-  // Optional: set accel +/-2g and gyro +/-250dps defaults explicitly
+  // Set accel +/-2g and gyro +/-250dps defaults explicitly
   Wire.beginTransmission(ADDR_MPU6050);
   Wire.write(0x1C); // ACCEL_CONFIG
   Wire.write(0x00);
@@ -168,6 +187,48 @@ float simulatedTemp() {
   return 36.8f + 0.2f * sinf(t * 0.1f) + random(-1, 2) * 0.03f;
 }
 
+#if USE_REAL_MAX30102
+void serviceMax30102() {
+  if (!data.maxPresent) return;
+
+  particleSensor.check(); // Drains samples from sensor FIFO without blocking
+  while (particleSensor.available()) {
+    uint32_t red = particleSensor.getFIFORed();
+    uint32_t ir = particleSensor.getFIFOIR();
+    particleSensor.nextSample();
+
+    if (ir < IR_FINGER_THRESHOLD) {
+      // Finger is not contacting the optical aperture
+      sampleIndex = 0;
+      hrValid = 0;
+      spo2Valid = 0;
+      continue;
+    }
+
+    if (sampleIndex < bufferLength) {
+      irBuffer[sampleIndex] = ir;
+      redBuffer[sampleIndex] = red;
+      sampleIndex++;
+    }
+
+    if (sampleIndex >= bufferLength) {
+      maxim_heart_rate_and_oxygen_saturation(
+        irBuffer, bufferLength, redBuffer,
+        &spo2Calculated, &spo2Valid,
+        &hrCalculated, &hrValid
+      );
+
+      // Shift window by 25 samples for continuous sliding calculations
+      for (int i = 25; i < bufferLength; i++) {
+        irBuffer[i - 25] = irBuffer[i];
+        redBuffer[i - 25] = redBuffer[i];
+      }
+      sampleIndex = 75;
+    }
+  }
+}
+#endif
+
 void readSensors() {
   // DS18B20 (non-blocking read from previous conversion, then trigger next)
   data.dsPresent = (ds18b20.getDeviceCount() > 0);
@@ -186,14 +247,39 @@ void readSensors() {
     data.tempC = simulatedTemp();
   }
 
-  // MAX30102 presence and vitals handling
-  data.maxPresent = max30102Check();
+  // MAX30102 reading or simulation mode
+#if USE_REAL_MAX30102
+  if (data.maxPresent) {
+    uint32_t currentIR = particleSensor.getIR();
+    if (currentIR < IR_FINGER_THRESHOLD) {
+      // Finger removed or insufficient contact: mark invalid (do not send fake numbers)
+      data.heartRate = NAN;
+      data.spo2 = NAN;
+    } else {
+      // Valid finger contact: extract real computed pulse and oxygenation
+      if (hrValid == 1 && hrCalculated >= 40 && hrCalculated <= 220) {
+        data.heartRate = (float)hrCalculated;
+      } else {
+        data.heartRate = NAN; // Calibrating / acquiring stable pulse wave
+      }
 
-  // Real raw processing not implemented here; robust simulation used when unavailable
+      if (spo2Valid == 1 && spo2Calculated >= 70 && spo2Calculated <= 100) {
+        data.spo2 = (float)spo2Calculated;
+      } else {
+        data.spo2 = NAN; // Calibrating ratio
+      }
+    }
+  } else {
+    data.heartRate = NAN;
+    data.spo2 = NAN;
+  }
+#else
+  data.maxPresent = max30102Check();
   data.heartRate = simulatedHR();
   data.spo2 = simulatedSpO2();
+#endif
 
-  // MPU6050
+  // MPU6050 accelerometer & gyroscope
   if (data.mpuPresent) {
     if (!mpu6050Read(data.ax, data.ay, data.az, data.gx, data.gy, data.gz)) {
       data.mpuPresent = false;
@@ -208,6 +294,7 @@ void readSensors() {
   float accMag = sqrtf(data.ax * data.ax + data.ay * data.ay + data.az * data.az);
   float gyroMag = sqrtf(data.gx * data.gx + data.gy * data.gy + data.gz * data.gz);
 
+  // Fall threshold: vector magnitude > 2.5g or freefall (<0.5g) followed by high rotational jerk (>250 dps)
   bool fallByMotion = (accMag > 2.5f) || ((accMag < 0.5f) && (gyroMag > 250.0f));
   data.fallDetected = fallByMotion;
 }
@@ -273,9 +360,9 @@ void updateBuzzer(AlertState s) {
 }
 
 void evaluateStateAndLog() {
-  bool hrBreach = (data.heartRate < 50.0f || data.heartRate > 120.0f);
-  bool spo2Breach = (data.spo2 < 92.0f);
-  bool tempBreach = (data.tempC > 38.5f);
+  bool hrBreach = !isnan(data.heartRate) && (data.heartRate < 50.0f || data.heartRate > 120.0f);
+  bool spo2Breach = !isnan(data.spo2) && (data.spo2 < 92.0f);
+  bool tempBreach = !isnan(data.tempC) && (data.tempC > 38.5f);
   bool fallBreach = data.fallDetected;
 
   bool anyBreach = hrBreach || spo2Breach || tempBreach || fallBreach;
@@ -303,20 +390,27 @@ void evaluateStateAndLog() {
                   consecutiveBreaches, sosLatched ? "YES" : "NO");
   }
 
-  Serial.println("---- Health Snapshot ----");
-  Serial.printf("HR: %.1f bpm  %s\n", data.heartRate, hrBreach ? "[BREACH]" : "[OK]");
-  Serial.printf("SpO2: %.1f %%  %s\n", data.spo2, spo2Breach ? "[BREACH]" : "[OK]");
-  Serial.printf("Temp: %.2f C  %s\n", data.tempC, tempBreach ? "[BREACH]" : "[OK]");
-  Serial.printf("MPU ax/ay/az: %.2f %.2f %.2f g\n", data.ax, data.ay, data.az);
-  Serial.printf("MPU gx/gy/gz: %.1f %.1f %.1f dps\n", data.gx, data.gy, data.gz);
-  Serial.printf("Fall: %s\n", fallBreach ? "YES [BREACH]" : "NO");
-  Serial.printf("Sensors: MAX=%s MPU=%s DS18B20=%s\n",
-                data.maxPresent ? "present(sim-vitals)" : "missing(sim-vitals)",
-                data.mpuPresent ? "present" : "missing(sim-motion)",
-                data.dsPresent ? "present" : "missing(sim-temp)");
-  Serial.printf("Consecutive breaches: %d | SOS latched: %s\n",
-                consecutiveBreaches, sosLatched ? "YES" : "NO");
-  Serial.println("-------------------------");
+  float accMag = sqrtf(data.ax * data.ax + data.ay * data.ay + data.az * data.az);
+
+  // 5-second formatted telemetry line for readable hardware monitor logs
+  char hrLog[24];
+  if (isnan(data.heartRate)) {
+    strcpy(hrLog, "-- (No Finger)");
+  } else {
+    snprintf(hrLog, sizeof(hrLog), "%.1f bpm", data.heartRate);
+  }
+
+  char spo2Log[24];
+  if (isnan(data.spo2)) {
+    strcpy(spo2Log, "-- (No Finger)");
+  } else {
+    snprintf(spo2Log, sizeof(spo2Log), "%.1f %%", data.spo2);
+  }
+
+  Serial.printf("[TELEMETRY 5s] HR: %s | SpO2: %s | Temp: %.2f C | accMag: %.2f g | state: %s | Wi-Fi: %s | last HTTP: %d\n",
+                hrLog, spo2Log, data.tempC, accMag, stateName(currentState),
+                WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED",
+                lastHttpCode);
 }
 
 void printHelp() {
@@ -493,11 +587,21 @@ void popFailedReading() {
 
 String buildTelemetryJson(const TelemetryReading& r) {
   String payload;
-  payload.reserve(220);
+  payload.reserve(240);
   payload += "{";
   payload += "\"device_id\":\""; payload += DEVICE_ID; payload += "\",";
-  payload += "\"heart_rate\":"; payload += String(r.heartRate, 1); payload += ",";
-  payload += "\"spo2\":"; payload += String(r.spo2, 1); payload += ",";
+  payload += "\"heart_rate\":";
+  if (isnan(r.heartRate)) {
+    payload += "null,";
+  } else {
+    payload += String(r.heartRate, 1); payload += ",";
+  }
+  payload += "\"spo2\":";
+  if (isnan(r.spo2)) {
+    payload += "null,";
+  } else {
+    payload += String(r.spo2, 1); payload += ",";
+  }
   payload += "\"temperature\":"; payload += String(r.temperature, 2); payload += ",";
   payload += "\"motion_flag\":"; payload += (r.motionFlag ? "true" : "false"); payload += ",";
   payload += "\"sos_pressed\":"; payload += (r.sosPressed ? "true" : "false"); payload += ",";
@@ -520,6 +624,7 @@ bool postTelemetry(const TelemetryReading& r, bool buffered) {
   http.addHeader("Content-Type", "application/json");
 
   int code = http.POST(payload);
+  lastHttpCode = code;
   Serial.printf("[HTTP] POST %s reading -> code: %d\n", buffered ? "buffered" : "live", code);
 
   bool ok = (code == 200 || code == 201);
@@ -610,7 +715,26 @@ void setup() {
   ds18b20.setWaitForConversion(false); // Enable non-blocking asynchronous conversions
   ds18b20.requestTemperatures();       // Initial asynchronous conversion
   data.mpuPresent = mpu6050Init();
+
+#if USE_REAL_MAX30102
+  if (particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    data.maxPresent = true;
+    byte ledBrightness = 60; // 0=Off to 255=50mA
+    byte sampleAverage = 4;  // 1, 2, 4, 8, 16, 32
+    byte ledMode = 2;        // 2 = Red + IR
+    byte sampleRate = 100;   // 100 Hz
+    int pulseWidth = 411;    // 411 us
+    int adcRange = 4096;     // 4096
+    particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+    particleSensor.setPulseAmplitudeRed(0x1F);
+    particleSensor.setPulseAmplitudeIR(0x1F);
+  } else {
+    data.maxPresent = false;
+    Serial.println("[MAX30102] Warning: Real sensor not detected at I2C 0x57. Check wiring!");
+  }
+#else
   data.maxPresent = max30102Check();
+#endif
 
   randomSeed((uint32_t)esp_random());
 
@@ -618,8 +742,9 @@ void setup() {
   Serial.println("ESP32 Health Monitor starting...");
   Serial.printf("I2C SDA=%d SCL=%d | ONEWIRE=%d | SOS=%d | BUZZ=%d\n",
                 PIN_I2C_SDA, PIN_I2C_SCL, PIN_ONEWIRE, PIN_SOS, PIN_BUZZ);
-  Serial.printf("Startup detect: MAX30102=%s, MPU6050=%s, DS18B20 devices=%d\n",
+  Serial.printf("Startup detect: MAX30102=%s (%s), MPU6050=%s, DS18B20 devices=%d\n",
                 data.maxPresent ? "YES" : "NO",
+                USE_REAL_MAX30102 ? "Real SparkFun Driver" : "Simulation Backup",
                 data.mpuPresent ? "YES" : "NO",
                 ds18b20.getDeviceCount());
   printHelp();
@@ -634,6 +759,10 @@ void loop() {
   checkSosButton();
   serviceWiFi();
   serviceBufferedFlush();
+
+#if USE_REAL_MAX30102
+  serviceMax30102();
+#endif
 
   unsigned long now = millis();
   if (now - lastSensorMs >= SENSOR_INTERVAL_MS) {

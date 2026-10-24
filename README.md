@@ -8,8 +8,8 @@ An end-to-end, medical IoT / IoE (Internet of Everything) continuous patient mon
 
 * **Multi-Sensor Edge Ingestion:**
   * **DS18B20:** High-precision digital body temperature (non-blocking, asynchronous conversion).
-  * **MPU-6050:** 6-axis accelerometer & gyroscope for impact and free-fall detection.
-  * **MAX30102:** Pulse oximetry & optical heart rate (I2C interface).
+  * **MPU-6050:** 6-axis accelerometer & gyroscope with calibrated fall detection threshold (`|a| > 2.5g` impact or `< 0.5g` freefall followed by `> 250 dps` angular rotation).
+  * **MAX30102:** Pulse oximetry & optical heart rate via SparkFun MAX3010x driver (`MAX30105.h` + `spo2_algorithm.h`) on I2C (0x57, SDA=21, SCL=22). Features automatic optical finger detection (`IR < 50000` marks "no finger" safely without false alarms) and `USE_REAL_MAX30102` simulation fallback toggle.
   * **Emergency SOS:** Hardware push-button with active-low software debouncing and immediate critical latching.
 * **Firmware Resilience:**
   * Multi-state alert machine (`NORMAL`, `WATCH`, `CRITICAL`) driving dedicated status LEDs and audible buzzer patterns.

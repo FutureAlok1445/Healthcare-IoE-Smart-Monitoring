@@ -267,3 +267,22 @@ class VitalIngestTests(TestCase):
         res_sim = self.client.get(f'/api/v1/patients/{p2.id}/')
         self.assertEqual(res_sim.data['connection_status'], 'SIMULATED')
         self.assertEqual(res_sim.data['data_source'], 'SIMULATION')
+
+    def test_vital_ingest_no_finger_contact(self):
+        payload = {
+            "device_id": "ESP32_NODE_01",
+            "heart_rate": None,
+            "spo2": None,
+            "temperature": 36.7,
+            "motion_flag": False,
+            "sos_pressed": False,
+            "state": "NORMAL",
+            "timestamp": 300000
+        }
+        res = self.client.post('/api/v1/vitals/', payload, format='json')
+        self.assertEqual(res.status_code, 201)
+        reading = VitalReading.objects.get(id=res.data['id'])
+        self.assertIsNone(reading.heart_rate)
+        self.assertIsNone(reading.spo2)
+        self.assertEqual(reading.state, 'NORMAL')
+        self.assertEqual(Alert.objects.count(), 0)

@@ -14,6 +14,12 @@
 #define ADDR_MAX30102 0x57
 #define ADDR_MPU6050  0x68
 
+// Sensor configuration & demo backup mode
+// Set to true to read real PPG optical data from physical MAX30102 over I2C (0x57).
+// Set to false to run the simulated vitals fallback (reliable demo backup).
+#define USE_REAL_MAX30102 true
+#define IR_FINGER_THRESHOLD 50000 // IR value below this threshold indicates "no finger"
+
 // Timing
 static const unsigned long SENSOR_INTERVAL_MS = 5000;
 

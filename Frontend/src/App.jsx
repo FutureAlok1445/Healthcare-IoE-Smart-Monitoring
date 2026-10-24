@@ -28,6 +28,8 @@ import {
   resolveAlert,
   logoutUser,
   getCurrentUser,
+  subscribeBackendStatus,
+  getIsBackendLive,
 } from './services/api';
 import './App.css';
 
@@ -52,6 +54,15 @@ export default function App() {
   const [activeEmergency, setActiveEmergency] = useState(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isBackendLive, setIsBackendLive] = useState(() => getIsBackendLive());
+
+  // Subscribe to real-time live vs demo backend connection status
+  useEffect(() => {
+    const unsub = subscribeBackendStatus((live) => {
+      setIsBackendLive(live);
+    });
+    return unsub;
+  }, []);
 
   // Apply theme to document
   useEffect(() => {
@@ -120,16 +131,39 @@ export default function App() {
     setConnError(null);
     setLastUpdated(new Date());
 
-    const criticalAlert = a.find(
-      (item) =>
-        item.level === 'CRITICAL' &&
-        item.status === 'NEW' &&
-        !item.acknowledged
-    );
+    const criticalAlert =
+      (a || []).find(
+        (item) => item.level === 'CRITICAL' && (item.status === 'NEW' || !item.acknowledged)
+      ) ||
+      (allA || []).find(
+        (item) => item.level === 'CRITICAL' && (item.status === 'NEW' || !item.acknowledged)
+      ) ||
+      (v && v[0] && (v[0].state === 'CRITICAL' || v[0].motion_flag || v[0].sos_pressed)
+        ? {
+            id: 'vital-crit-' + (v[0].id || Date.now()),
+            level: 'CRITICAL',
+            status: 'NEW',
+            alert_type: v[0].sos_pressed
+              ? 'SOS_EMERGENCY'
+              : v[0].motion_flag
+              ? 'FALL_DETECTED'
+              : 'THRESHOLD_BREACH',
+            message: v[0].sos_pressed
+              ? 'Emergency SOS panic button pressed by patient'
+              : v[0].motion_flag
+              ? 'Patient fall impact detected (>2.5g)'
+              : 'Critical physiological threshold breach detected',
+            reading: v[0],
+            created_at: v[0].received_at || new Date().toISOString(),
+            channels_sent: 'SMS, Email, Cellular Alert',
+            acknowledged: false,
+          }
+        : null);
+
     if (criticalAlert) {
       setActiveEmergency((prev) => {
         if (prev?.id === 999) return prev;
-        if (prev?.id === criticalAlert.id) return prev;
+        if (prev?.id === criticalAlert.id && prev?.acknowledged) return prev;
         return criticalAlert;
       });
     }
@@ -346,6 +380,19 @@ export default function App() {
               <IconActivity size={14} />
               <span>{theme === 'light' ? 'Night Ward' : 'Light Mode'}</span>
             </button>
+
+            {/* Live vs Demo Mode Indicator */}
+            <div
+              className={`telemetry-mode-pill ${isBackendLive ? 'mode-live' : 'mode-demo'}`}
+              title={
+                isBackendLive
+                  ? 'Connected to live Django REST Backend (0.0.0.0:8000)'
+                  : 'Backend unreachable — operating in local demo data mode'
+              }
+            >
+              <span className={`mode-dot ${isBackendLive ? 'dot-live' : 'dot-demo'}`} />
+              <span>{isBackendLive ? 'LIVE BACKEND' : 'DEMO MODE (OFFLINE)'}</span>
+            </div>
 
             {/* Central System Status Badge */}
             <div className={`clinical-status-pill ${statusClass}`}>

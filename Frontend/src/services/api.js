@@ -7,6 +7,46 @@ const api = axios.create({
   timeout: 8000,
 });
 
+let isBackendLive = false;
+const backendStatusListeners = new Set();
+
+export function subscribeBackendStatus(callback) {
+  backendStatusListeners.add(callback);
+  callback(isBackendLive);
+  return () => backendStatusListeners.delete(callback);
+}
+
+function setBackendStatus(live) {
+  if (isBackendLive !== live) {
+    isBackendLive = live;
+    backendStatusListeners.forEach((fn) => {
+      try {
+        fn(isBackendLive);
+      } catch (err) {
+        console.error('Backend status subscriber error:', err);
+      }
+    });
+  }
+}
+
+export function getIsBackendLive() {
+  return isBackendLive;
+}
+
+// Track live backend availability
+api.interceptors.response.use(
+  (response) => {
+    setBackendStatus(true);
+    return response;
+  },
+  (error) => {
+    if (!error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') {
+      setBackendStatus(false);
+    }
+    return Promise.reject(error);
+  }
+);
+
 const BUILT_IN_DEMO_DATA = {
   users: [
     { email: 'dr.mehta@caresense.io', password: 'DoctorPass2026!', display_name: 'Dr. Ronald Mehta', username: 'dr.mehta', role: 'DOCTOR', permissions: { can_update_thresholds: true } },

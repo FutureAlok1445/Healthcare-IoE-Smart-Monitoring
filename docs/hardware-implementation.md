@@ -26,11 +26,9 @@ Use the attached ESP32 Smart Healthcare wiring schematic together with this pin 
 
 The firmware files `src/main.cpp` and `HealthMonitor/HealthMonitor.ino` use the same pin assignments. Test the I2C devices and the SOS button from the serial monitor before connecting the device to a patient workflow.
 
-## Current Firmware Limitation
+## MAX30102 Signal Processing & Finger Detection
 
-The firmware detects the MAX30102 on the I2C bus, but its heart-rate and SpO2 signal-processing algorithm is not implemented yet. Until that algorithm is added, the firmware sends clearly simulated heart-rate and SpO2 values. The DS18B20 temperature path and MPU6050 motion path are prepared for hardware readings.
-
-This is the only hardware-dependent item intentionally left open. It requires
-real MAX30102 red/infrared samples and should be validated on the sensor before
-being used for clinical decisions. The no-hardware dashboard simulator is not
-affected.
+The firmware features full integration with the SparkFun MAX3010x library (`MAX30105.h` + `spo2_algorithm.h`).
+- **Optical Finger Detection:** When no finger contacts the optical aperture (`IR < 50000`), the firmware marks HR and SpO2 as invalid (`null`), safely preventing false bradycardia/hypoxia threshold breaches.
+- **Real-Time Sliding Buffer:** Samples are continuously collected at 100 Hz in a non-blocking FIFO service loop, executing the standard Maxim PPG peak detection and AC/DC ratio calculation algorithm.
+- **Demo Simulation Fallback:** Setting `#define USE_REAL_MAX30102 false` in `config.h` enables legacy synthetic vitals as a safe presentation demo backup.
